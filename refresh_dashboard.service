@@ -1,0 +1,13 @@
+[Unit]
+Description=Update E-Paper Dashboard
+After=network.target
+
+[Service]
+User=nikhil
+WorkingDirectory=/home/nikhil/Projects/E_Dashboard
+ExecStart=/usr/bin/python3 /home/nikhil/Projects/E_Dashboard/refresh_dashboard.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

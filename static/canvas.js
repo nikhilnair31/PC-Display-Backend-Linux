@@ -1,0 +1,485 @@
+// --- CONFIG ---
+let CANVAS_WIDTH = 480;
+let CANVAS_HEIGHT = 800;
+let GRID_SIZE = 40;
+let GRID_PADDING = 4;
+
+const canvas = document.getElementById("gridCanvas");
+const ctx = canvas.getContext("2d");
+
+const canvasWidthInput = document.getElementById("canvasWidthInput");
+const canvasHeightInput = document.getElementById("canvasHeightInput");
+const gridSizeInput = document.getElementById("gridSizeInput");
+const gridPaddingInput = document.getElementById("gridPaddingInput");
+const applyCanvasSettingsBtn = document.getElementById("applyCanvasSettings");
+
+const cellStaticTextInput = document.getElementById("cellStaticTextInput");
+const cellImageSourceInput = document.getElementById("cellImageSourceInput");
+const cellStaticImageFileInput = document.getElementById("cellStaticImageFileInput");
+const cellStaticImageUrlInput  = document.getElementById("cellStaticImageUrlInput");
+
+const cellNameInput = document.getElementById("cellNameInput");
+const cellFnInput = document.getElementById("cellFnInput");
+const cellFontSizeInput = document.getElementById("cellFontSizeInput");
+const fontBoldInput = document.getElementById("fontBold");
+const fontItalicInput = document.getElementById("fontItalic");
+const cellInvertInput = document.getElementById("cellInvertInput");
+const cellScaleModeInput = document.getElementById("cellScaleModeInput");
+const cellIndentInput = document.getElementById("cellIndentInput");
+const cellOutlineInput = document.getElementById("cellOutlineInput");
+
+const addCellBtn = document.getElementById("addCellBtn");
+const deleteCellBtn = document.getElementById("deleteCellBtn");
+const lockLayoutBtn = document.getElementById("lockLayoutBtn");
+
+const cellHAlignInput = document.getElementById("cellHAlignInput");
+const cellVAlignInput = document.getElementById("cellVAlignInput");
+
+// Each cell:
+// { id, x, y, w, h, name, fnName, invert, fontSize }
+let cells = [];
+let selectedCell = null;
+
+let dragMode = null;     // "move" or "resize" or null
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+
+const HANDLE_SIZE = 10;
+
+function setCanvasSize() {
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
+    draw();
+}
+
+function snapToGrid(value) {
+    return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
+
+function clampFontSize(n) {
+    if (isNaN(n)) return 12;
+    return Math.max(6, Math.min(48, n));
+}
+
+function addCell() {
+    const name = cellNameInput.value.trim() || ("Cell " + (cells.length + 1));
+    const fnName = cellFnInput.value.trim();
+    const invert = cellInvertInput.checked;
+    const fontSize = clampFontSize(parseInt(cellFontSizeInput.value, 10));
+    const hAlign = cellHAlignInput.value || "left";
+    const vAlign = cellVAlignInput.value || "top";
+    const scaleMode = cellScaleModeInput.value || "fit";
+    const staticText = cellStaticTextInput.value || "";
+    const urlVal = cellStaticImageUrlInput ? cellStaticImageUrlInput.value.trim() : "";
+    const imageSource = cellImageSourceInput ? (cellImageSourceInput.value || "none") : "none";
+
+    const defaultWidth = GRID_SIZE * 6;
+    const defaultHeight = GRID_SIZE * 3;
+
+    const cell = {
+        id: Date.now() + "_" + Math.random().toString(36).slice(2),
+        x: snapToGrid((CANVAS_WIDTH - defaultWidth) / 2),
+        y: snapToGrid((CANVAS_HEIGHT - defaultHeight) / 2),
+        w: defaultWidth,
+        h: defaultHeight,
+        name: name,
+        fnName: fnName,
+        invert: invert,
+        fontSize: fontSize,
+        hAlign: hAlign,
+        vAlign: vAlign,
+        scaleMode: scaleMode,
+        staticText: staticText,
+        staticImage: imageSource === "url" ? urlVal : "",
+        staticImageSource: imageSource,
+        indent: 0,
+        outline: false,
+    };
+
+    cells.push(cell);
+    selectedCell = cell;
+    draw();
+}
+
+function drawGrid() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "#dddddd";
+    ctx.lineWidth = 1;
+
+    for (let x = 0; x <= canvas.width; x += GRID_SIZE) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, canvas.height);
+        ctx.stroke();
+    }
+
+    for (let y = 0; y <= canvas.height; y += GRID_SIZE) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(canvas.width, y + 0.5);
+        ctx.stroke();
+    }
+}
+
+function drawCells() {
+    for (const cell of cells) {
+        const fillColor = cell.invert ? "#000000" : "#ffffff";
+        const textColor = cell.invert ? "#ffffff" : "#000000";
+        const handleColor = "#808080";
+
+        // Fill
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
+
+        // Border
+        if (cell === selectedCell || cell.outline) {
+            ctx.lineWidth = (cell === selectedCell) ? 3 : 1.5;
+            ctx.strokeStyle = (cell === selectedCell) ? "#7e7e7eff" : "#000000ff";
+            ctx.strokeRect(cell.x, cell.y, cell.w, cell.h);
+        }
+
+        // Resize handle
+        ctx.fillStyle = handleColor;
+        ctx.fillRect(
+            cell.x + cell.w - HANDLE_SIZE,
+            cell.y + cell.h - HANDLE_SIZE,
+            HANDLE_SIZE,
+            HANDLE_SIZE
+        );
+
+        // Text overlay with alignment
+        const padding = (cell.indent || 0) + 4;
+        const fontSize = clampFontSize(cell.fontSize || 12);
+        ctx.fillStyle = textColor;
+        ctx.font = `${fontSize}px system-ui, sans-serif`;
+        ctx.textBaseline = "top";
+
+        let label;
+        if (cell.staticText && cell.staticText.trim().length > 0) {
+            label = cell.staticText;
+        } else {
+            const fnSuffix = cell.fnName ? (" • " + cell.fnName) : "";
+            label = cell.name + fnSuffix;
+        }
+
+        const hAlign = (cell.hAlign || "left").toLowerCase();
+        const vAlign = (cell.vAlign || "top").toLowerCase();
+
+        const lines = [label];
+        const lineHeight = fontSize + 2;
+        const totalHeight = lineHeight * lines.length;
+
+        let yStart;
+        if (vAlign === "middle") {
+            yStart = cell.y + (cell.h - totalHeight) / 2;
+        } else if (vAlign === "bottom") {
+            yStart = cell.y + cell.h - padding - totalHeight;
+        } else {
+            yStart = cell.y + padding;
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(
+            cell.x + padding,
+            cell.y + padding,
+            cell.w - 2 * padding,
+            cell.h - 2 * padding
+        );
+        ctx.clip();
+
+        let yText = yStart;
+        for (const line of lines) {
+            const textW = ctx.measureText(line).width;
+            let xText;
+            if (hAlign === "center") {
+                xText = cell.x + (cell.w - textW) / 2;
+            } else if (hAlign === "right") {
+                xText = cell.x + cell.w - padding - textW;
+            } else {
+                xText = cell.x + padding;
+            }
+            ctx.fillText(line, xText, yText);
+            yText += lineHeight;
+        }
+
+        ctx.restore();
+    }
+}
+
+function draw() {
+    drawGrid();
+    drawCells();
+}
+
+function getMousePos(evt) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+}
+
+function hitTestCell(x, y) {
+    for (let i = cells.length - 1; i >= 0; i--) {
+        const c = cells[i];
+        if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) return c;
+    }
+    return null;
+}
+
+function isOnResizeHandle(cell, x, y) {
+    return (
+        x >= cell.x + cell.w - HANDLE_SIZE &&
+        x <= cell.x + cell.w &&
+        y >= cell.y + cell.h - HANDLE_SIZE &&
+        y <= cell.y + cell.h
+    );
+}
+
+canvas.addEventListener("mousedown", (evt) => {
+    const pos = getMousePos(evt);
+    const cell = hitTestCell(pos.x, pos.y);
+
+    if (!cell) {
+        selectedCell = null;
+        dragMode = null;
+        draw();
+        return;
+    }
+
+    selectedCell = cell;
+
+    // Load into form
+    cellNameInput.value = cell.name;
+    cellFnInput.value = cell.fnName || "";
+    cellInvertInput.checked = !!cell.invert;
+    cellFontSizeInput.value = clampFontSize(cell.fontSize || 12);
+    cellHAlignInput.value = cell.hAlign || "left";
+    cellVAlignInput.value = cell.vAlign || "top";
+    cellScaleModeInput.value = cell.scaleMode || "fit";
+    cellStaticTextInput.value = cell.staticText || "";
+    const src = cell.staticImageSource || (cell.staticImage ? "url" : "none");
+    cellImageSourceInput.value = src;
+    cellStaticImageUrlInput.value = src === "url" ? (cell.staticImage || "") : "";
+    cellStaticImageFileInput.value = "";
+    cellIndentInput.value = selectedCell.indent || 0;
+    cellOutlineInput.checked = !!selectedCell.outline;
+
+    if (isOnResizeHandle(cell, pos.x, pos.y)) {
+        dragMode = "resize";
+        dragOffsetX = pos.x - (cell.x + cell.w);
+        dragOffsetY = pos.y - (cell.y + cell.h);
+    } else {
+        dragMode = "move";
+        dragOffsetX = pos.x - cell.x;
+        dragOffsetY = pos.y - cell.y;
+    }
+
+    draw();
+});
+
+canvas.addEventListener("mousemove", (evt) => {
+    if (!selectedCell || !dragMode) return;
+
+    const pos = getMousePos(evt);
+    if (dragMode === "move") {
+        let newX = snapToGrid(pos.x - dragOffsetX);
+        let newY = snapToGrid(pos.y - dragOffsetY);
+        newX = Math.max(0, Math.min(newX, CANVAS_WIDTH - selectedCell.w));
+        newY = Math.max(0, Math.min(newY, CANVAS_HEIGHT - selectedCell.h));
+        selectedCell.x = newX; selectedCell.y = newY;
+    } else if (dragMode === "resize") {
+        let newW = snapToGrid(pos.x - selectedCell.x - dragOffsetX);
+        let newH = snapToGrid(pos.y - selectedCell.y - dragOffsetY);
+        const minSize = GRID_SIZE * 1;
+        newW = Math.max(minSize, Math.min(newW, CANVAS_WIDTH - selectedCell.x));
+        newH = Math.max(minSize, Math.min(newH, CANVAS_HEIGHT - selectedCell.y));
+        selectedCell.w = newW; selectedCell.h = newH;
+    }
+    draw();
+});
+
+window.addEventListener("mouseup", () => { dragMode = null; });
+canvas.addEventListener("mouseleave", () => { dragMode = null; });
+
+// Update cell properties when form changes
+cellNameInput.addEventListener("change", () => {
+    if (selectedCell) { selectedCell.name = cellNameInput.value.trim() || selectedCell.name; draw(); }
+});
+cellFnInput.addEventListener("change", () => {
+    if (selectedCell) { selectedCell.fnName = cellFnInput.value.trim(); draw(); }
+});
+cellInvertInput.addEventListener("change", () => {
+    if (selectedCell) { selectedCell.invert = cellInvertInput.checked; draw(); }
+});
+cellFontSizeInput.addEventListener("change", () => {
+    if (selectedCell) { selectedCell.fontSize = clampFontSize(parseInt(cellFontSizeInput.value, 10)); draw(); }
+});
+cellHAlignInput.addEventListener("change", () => {
+    if (selectedCell) { selectedCell.hAlign = cellHAlignInput.value || "left"; draw(); }
+});
+cellVAlignInput.addEventListener("change", () => {
+    if (selectedCell) { selectedCell.vAlign = cellVAlignInput.value || "top"; draw(); }
+});
+cellScaleModeInput.addEventListener("change", () => {
+    if (selectedCell) {
+        const v = (cellScaleModeInput.value || "fit").toLowerCase();
+        if (v === "fit" || v === "fill" || v === "none") { selectedCell.scaleMode = v; draw(); }
+    }
+});
+cellStaticTextInput.addEventListener("input", () => {
+    if (selectedCell) { selectedCell.staticText = cellStaticTextInput.value || ""; draw(); }
+});
+cellImageSourceInput.addEventListener("change", () => {
+    if (!selectedCell) return;
+    const src = cellImageSourceInput.value || "none";
+    selectedCell.staticImageSource = src;
+    if (src === "none") {
+        selectedCell.staticImage = "";
+        cellStaticImageUrlInput.value = "";
+        cellStaticImageFileInput.value = "";
+    }
+    draw();
+});
+cellStaticImageFileInput.addEventListener("change", async (e) => {
+    if (!selectedCell) return;
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+        const resp = await fetch("/upload_static_image", { method: "POST", body: formData });
+        if (!resp.ok) {
+            const txt = await resp.text();
+            alert("Failed to upload image: " + resp.status + " - " + txt);
+            return;
+        }
+        const data = await resp.json();
+        const path = data.path;
+        selectedCell.staticImage = path;
+        selectedCell.staticImageSource = "upload";
+        cellImageSourceInput.value = "upload";
+        draw();
+    } catch (err) {
+        console.error("Upload error", err);
+        alert("Error uploading image (see console).");
+    }
+});
+cellStaticImageUrlInput.addEventListener("change", () => {
+    if (!selectedCell) return;
+    const url = cellStaticImageUrlInput.value.trim();
+    selectedCell.staticImage = url;
+    selectedCell.staticImageSource = url ? "url" : "none";
+    cellImageSourceInput.value = selectedCell.staticImageSource;
+    draw();
+});
+cellIndentInput.addEventListener("change", () => {
+    if (selectedCell) {
+        selectedCell.indent = parseInt(cellIndentInput.value, 10) || 0;
+        draw();
+    }
+});
+cellOutlineInput.addEventListener("change", () => {
+    if (selectedCell) {
+        selectedCell.outline = cellOutlineInput.checked;
+        draw();
+    }
+});
+
+addCellBtn.addEventListener("click", addCell);
+deleteCellBtn.addEventListener("click", () => {
+    if (!selectedCell) return;
+    cells = cells.filter(c => c !== selectedCell);
+    selectedCell = null;
+    draw();
+});
+
+applyCanvasSettingsBtn.addEventListener("click", () => {
+    const w = parseInt(canvasWidthInput.value, 10) || CANVAS_WIDTH;
+    const h = parseInt(canvasHeightInput.value, 10) || CANVAS_HEIGHT;
+    const g = parseInt(gridSizeInput.value, 10) || GRID_SIZE;
+    const p = parseInt(gridPaddingInput.value, 10) || GRID_PADDING;
+    CANVAS_WIDTH = Math.max(100, w);
+    CANVAS_HEIGHT = Math.max(100, h);
+    GRID_SIZE = Math.max(5, g);
+    GRID_PADDING = Math.max(4, p);
+    setCanvasSize();
+});
+
+lockLayoutBtn.addEventListener("click", async () => {
+    const layout = {
+        canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT, gridSize: GRID_SIZE },
+        cells: cells.map(c => ({
+            id: c.id, x: c.x, y: c.y, w: c.w, h: c.h,
+            name: c.name,
+            fnName: c.fnName || "",
+            invert: !!c.invert,
+            fontSize: clampFontSize(c.fontSize || 12),
+            hAlign: c.hAlign || "left",
+            vAlign: c.vAlign || "top",
+            scaleMode: c.scaleMode || "fit",
+            staticText: c.staticText || "",
+            staticImage: c.staticImage || "",
+            staticImageSource: c.staticImageSource || "none",
+            indent: c.indent || 0,
+            outline: !!c.outline,
+        }))
+    };
+    try {
+        const resp = await fetch("/canvas_layout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(layout)
+        });
+        if (!resp.ok) {
+            const txt = await resp.text();
+            alert("Failed to save layout: " + resp.status + " - " + txt);
+        } else {
+            alert("Layout saved.");
+        }
+    } catch (e) {
+        console.error("Error saving layout", e);
+        alert("Error saving layout (see console).");
+    }
+});
+
+async function loadSavedLayout() {
+    try {
+        const resp = await fetch("/canvas_layout");
+        if (!resp.ok) { setCanvasSize(); return; }
+        const data = await resp.json();
+        if (!data || !data.canvas) { setCanvasSize(); return; }
+        CANVAS_WIDTH = data.canvas.width || CANVAS_WIDTH;
+        CANVAS_HEIGHT = data.canvas.height || CANVAS_HEIGHT;
+        GRID_SIZE = data.canvas.gridSize || GRID_SIZE;
+
+        canvasWidthInput.value = CANVAS_WIDTH;
+        canvasHeightInput.value = CANVAS_HEIGHT;
+        gridSizeInput.value = GRID_SIZE;
+        gridPaddingInput.value = GRID_PADDING;
+
+        cells = (data.cells || []).map(c => ({
+            id: c.id, x: c.x, y: c.y, w: c.w, h: c.h,
+            name: c.name,
+            fnName: c.fnName || "",
+            invert: !!c.invert,
+            fontSize: clampFontSize(c.fontSize || 12),
+            hAlign: c.hAlign || "left",
+            vAlign: c.vAlign || "top",
+            scaleMode: (c.scaleMode || "fit").toLowerCase(),
+            staticText: c.staticText || "",
+            staticImage: c.staticImage || "",
+            staticImageSource: c.staticImageSource || "none",
+            indent: c.indent || 0,
+            outline: !!c.outline,
+        }));
+        setCanvasSize();
+    } catch (e) {
+        console.error("Failed to load layout", e);
+        setCanvasSize();
+    }
+}
+
+// Initial setup
+loadSavedLayout();

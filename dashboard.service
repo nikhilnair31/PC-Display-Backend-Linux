@@ -1,0 +1,15 @@
+# sudo nano /etc/systemd/system/dashboard.service
+
+[Unit]
+Description=Flask Server for E Ink Dashboard
+After=network.target
+
+[Service]
+User=nikhil
+WorkingDirectory=/home/nikhil/Projects/PC_Display
+Environment="PATH=/usr/bin:/usr/local/bin"
+ExecStart=/home/nikhil/Projects/PC_Display/env/bin/python /home/nikhil/Projects/PC_Display/app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

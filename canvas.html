@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>E-Paper Dashboard Layout</title>
+    <link rel="stylesheet" href="/static/canvas.css" />
+</head>
+<body>
+    <div id="sidebar">
+        <h1>E-Paper Dashboard Layout</h1>
+
+        <!-- Actions -->
+        <details open>
+            <summary>Actions</summary>
+            <div class="actions">
+                <button id="addCellBtn">Add New Cell</button>
+                <button id="deleteCellBtn">Delete Selected Cell</button>
+                <button id="lockLayoutBtn">Save Layout</button>
+            </div>
+        </details>
+
+        <!-- Canvas & Grid -->
+        <details>
+            <summary>Canvas & Grid</summary>
+            <label>Canvas Width (px)</label>
+            <input type="number" id="canvasWidthInput" value="480" />
+            <label>Canvas Height (px)</label>
+            <input type="number" id="canvasHeightInput" value="800" />
+            <label>Grid Size (px)</label>
+            <input type="number" id="gridSizeInput" value="40" min="20" max="80" />
+            <label>Padding (px)</label>
+            <input type="number" id="gridPaddingInput" value="4" min="0" max="12" />
+            <button id="applyCanvasSettings">Apply Canvas Settings</button>
+        </details>
+
+        <!-- Cell: General -->
+        <details open>
+            <summary>Cell: General</summary>
+            <label>Cell Name</label>
+            <input type="text" id="cellNameInput" placeholder="e.g. CPU Status" />
+
+            <label>Cell Function Name</label>
+            <input type="text" id="cellFnInput" placeholder="e.g. get_pc_status()" />
+
+            <label class="checkbox-inline">
+                <input type="checkbox" id="cellInvertInput" />
+                Invert cell colors (black background, white text)
+            </label>
+
+            <label>Horizontal Align</label>
+            <select id="cellHAlignInput">
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+            </select>
+
+            <label>Vertical Align</label>
+            <select id="cellVAlignInput">
+                <option value="top">Top</option>
+                <option value="middle">Middle</option>
+                <option value="bottom">Bottom</option>
+            </select>
+            
+            <label>Indent (px)</label>
+            <input type="number" id="cellIndentInput" value="0" min="0" max="50" />
+
+            <label class="checkbox-inline">
+                <input type="checkbox" id="cellOutlineInput" />
+                Draw outline
+            </label>
+        </details>
+
+        <!-- Cell: Text -->
+        <details>
+            <summary>Cell: Text</summary>
+            <label>Static Text (optional)</label>
+            <textarea id="cellStaticTextInput" rows="3" style="font-size:12px;"></textarea>
+
+            <label>Text Size (px)</label>
+            <input type="number" id="cellFontSizeInput" value="12" min="6" max="48" />
+            
+            <div class="field-row">
+                <label>Font style</label>
+                <div class="toggle-group">
+                <label>
+                    <input type="checkbox" id="fontBold" />
+                    Bold
+                </label>
+                <label style="margin-left: 8px;">
+                    <input type="checkbox" id="fontItalic" />
+                    Italic
+                </label>
+                </div>
+            </div>
+        </details>
+
+        <!-- Cell: Image -->
+        <details>
+            <summary>Cell: Image</summary>
+            <label>Image Source</label>
+            <select id="cellImageSourceInput">
+                <option value="none">None</option>
+                <option value="upload">Upload from computer</option>
+                <option value="url">CDN / URL</option>
+            </select>
+
+            <label>Upload Image (file explorer)</label>
+            <input type="file" id="cellStaticImageFileInput" accept="image/*" />
+
+            <label>CDN Image URL</label>
+            <input type="text" id="cellStaticImageUrlInput" placeholder="https://cdn.example.com/image.png" />
+
+            <label>Image Scale</label>
+            <select id="cellScaleModeInput">
+                <option value="fit">Fit inside cell</option>
+                <option value="fill">Fill cell</option>
+                <option value="none">No scaling (crop)</option>
+            </select>
+        </details>
+
+        <div class="hint">
+            • Left-click inside a cell to drag it<br />
+            • Drag the small square at bottom-right to resize<br />
+            • Click a cell to load its properties into the form<br />
+            • Layout JSON includes fnName, invert, and fontSize for the renderer<br />
+            • Save layout once edits completed
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="gridCanvas"></canvas>
+    </div>
+
+    <script src="/static/canvas.js"></script>
+</body>
+</html>
