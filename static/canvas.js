@@ -1,8 +1,11 @@
+// canvas.js
+
 // --- CONFIG ---
 let CANVAS_WIDTH = 480;
 let CANVAS_HEIGHT = 800;
 let GRID_SIZE = 40;
 let GRID_PADDING = 4;
+let REFRESH_INTERVAL = 1200;
 
 const canvas = document.getElementById("gridCanvas");
 const ctx = canvas.getContext("2d");
@@ -11,6 +14,7 @@ const canvasWidthInput = document.getElementById("canvasWidthInput");
 const canvasHeightInput = document.getElementById("canvasHeightInput");
 const gridSizeInput = document.getElementById("gridSizeInput");
 const gridPaddingInput = document.getElementById("gridPaddingInput");
+const refreshIntervalInput = document.getElementById("refreshIntervalInput");
 const applyCanvasSettingsBtn = document.getElementById("applyCanvasSettings");
 
 const cellStaticTextInput = document.getElementById("cellStaticTextInput");
@@ -31,6 +35,7 @@ const cellOutlineInput = document.getElementById("cellOutlineInput");
 const addCellBtn = document.getElementById("addCellBtn");
 const deleteCellBtn = document.getElementById("deleteCellBtn");
 const lockLayoutBtn = document.getElementById("lockLayoutBtn");
+const forceRefreshBtn = document.getElementById("forceRefreshBtn");
 
 const cellHAlignInput = document.getElementById("cellHAlignInput");
 const cellVAlignInput = document.getElementById("cellVAlignInput");
@@ -400,16 +405,24 @@ applyCanvasSettingsBtn.addEventListener("click", () => {
     const h = parseInt(canvasHeightInput.value, 10) || CANVAS_HEIGHT;
     const g = parseInt(gridSizeInput.value, 10) || GRID_SIZE;
     const p = parseInt(gridPaddingInput.value, 10) || GRID_PADDING;
+    const r = parseInt(refreshIntervalInput.value, 10) || REFRESH_INTERVAL;
     CANVAS_WIDTH = Math.max(100, w);
     CANVAS_HEIGHT = Math.max(100, h);
     GRID_SIZE = Math.max(5, g);
     GRID_PADDING = Math.max(4, p);
+    REFRESH_INTERVAL = Math.max(60, r);
     setCanvasSize();
 });
 
 lockLayoutBtn.addEventListener("click", async () => {
     const layout = {
-        canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT, gridSize: GRID_SIZE },
+        canvas: { 
+            width: CANVAS_WIDTH, 
+            height: CANVAS_HEIGHT, 
+            gridSize: GRID_SIZE,
+            padding: GRID_PADDING,
+            refreshInterval: REFRESH_INTERVAL
+        },
         cells: cells.map(c => ({
             id: c.id, x: c.x, y: c.y, w: c.w, h: c.h,
             name: c.name,
@@ -444,20 +457,49 @@ lockLayoutBtn.addEventListener("click", async () => {
     }
 });
 
+forceRefreshBtn.addEventListener("click", async () => {
+    try {
+        forceRefreshBtn.innerText = "Refreshing...";
+        forceRefreshBtn.disabled = true;
+
+        const resp = await fetch("/force_push", { method: "POST" });
+        
+        if (resp.ok) {
+            console.log("Force push triggered successfully");
+            // Optional: visual feedback that it worked
+            setTimeout(() => {
+                forceRefreshBtn.innerText = "Force Refresh Pi";
+                forceRefreshBtn.disabled = false;
+            }, 2000);
+        } else {
+            alert("Failed to trigger refresh.");
+            forceRefreshBtn.disabled = false;
+        }
+    } catch (e) {
+        console.error("Error triggering force refresh:", e);
+        alert("Error connecting to server.");
+        forceRefreshBtn.disabled = false;
+    }
+});
+
 async function loadSavedLayout() {
     try {
         const resp = await fetch("/canvas_layout");
         if (!resp.ok) { setCanvasSize(); return; }
         const data = await resp.json();
         if (!data || !data.canvas) { setCanvasSize(); return; }
+
         CANVAS_WIDTH = data.canvas.width || CANVAS_WIDTH;
         CANVAS_HEIGHT = data.canvas.height || CANVAS_HEIGHT;
         GRID_SIZE = data.canvas.gridSize || GRID_SIZE;
+        GRID_PADDING = data.canvas.padding || 4;
+        REFRESH_INTERVAL = data.canvas.refreshInterval || 1200;
 
         canvasWidthInput.value = CANVAS_WIDTH;
         canvasHeightInput.value = CANVAS_HEIGHT;
         gridSizeInput.value = GRID_SIZE;
         gridPaddingInput.value = GRID_PADDING;
+        refreshIntervalInput.value = REFRESH_INTERVAL;
 
         cells = (data.cells || []).map(c => ({
             id: c.id, x: c.x, y: c.y, w: c.w, h: c.h,

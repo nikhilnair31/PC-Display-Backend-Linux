@@ -1,3 +1,4 @@
+<!-- canvas.html -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -16,6 +17,7 @@
                 <button id="addCellBtn">Add New Cell</button>
                 <button id="deleteCellBtn">Delete Selected Cell</button>
                 <button id="lockLayoutBtn">Save Layout</button>
+                <button id="forceRefreshBtn" style="background-color: #4a90e2; color: white; margin-top: 10px;">Force Refresh Pi</button>
             </div>
         </details>
 
@@ -30,6 +32,9 @@
             <input type="number" id="gridSizeInput" value="40" min="20" max="80" />
             <label>Padding (px)</label>
             <input type="number" id="gridPaddingInput" value="4" min="0" max="12" />
+            <label>Refresh Interval (seconds)</label>
+            <input type="number" id="refreshIntervalInput" value="1200" min="30" />
+            <p style="font-size: 10px; color: #666;">300 = 5min, 1200 = 20min, 3600 = 1hr</p>
             <button id="applyCanvasSettings">Apply Canvas Settings</button>
         </details>
 

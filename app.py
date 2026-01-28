@@ -1,4 +1,6 @@
-import re, os, sys, json, time, random, psutil, subprocess, requests, tempfile, importlib, inspect, traceback
+# app.py
+
+import re, os, sys, json, time, random, psutil, subprocess, requests, tempfile, importlib, inspect, traceback, threading
 from io import (
     BytesIO
 )
@@ -32,12 +34,28 @@ STATIC_IMG_DIR = os.path.join(BASE_DIR, "static_images")
 os.makedirs(STATIC_IMG_DIR, exist_ok=True)
 PRINTER_STATE_PATH = os.path.join(os.path.dirname(__file__), "printer_state.json")
 WEBHOOK_SECRET = os.environ.get("OCTO_WEBHOOK_SECRET", "SOME_LONG_RANDOM_STRING")
+RPI_ENDPOINT = os.environ.get("RPI_URL")
 
 functions_module = importlib.import_module("functions")
 FUNCTION_MAP = {
     name: fn
     for name, fn in inspect.getmembers(functions_module, inspect.isfunction)
 }
+
+EVENT_MAP = {
+    1: "STARTED",
+    2: "COMPLETED",
+    3: "FAILED",
+    4: "PAUSED",
+    5: "RESUMED",
+    6: "UPDATE",
+    7: "ATTENTION",
+    8: "CANCELED",
+    9: "ERROR",
+    10: "COOLDOWN",
+}
+
+push_event = threading.Event()
 
 app = Flask(__name__)
 
@@ -62,6 +80,7 @@ def canvas_layout():
             print("Failed to save layout:", e, flush=True)
             return "Failed to save layout", 500
 
+        push_event.set() # Wake up the worker to push the new layout immediately
         return jsonify({"status": "ok"})
 
     # GET -> load layout
@@ -111,19 +130,6 @@ def octo_webhook():
 
     state = load_printer_state()
 
-    EVENT_MAP = {
-        1: "STARTED",
-        2: "COMPLETED",
-        3: "FAILED",
-        4: "PAUSED",
-        5: "RESUMED",
-        6: "UPDATE",
-        7: "ATTENTION",
-        8: "CANCELED",
-        9: "ERROR",
-        10: "COOLDOWN",
-    }
-
     # ---- APPLY EVENT TYPE STATE ----
     if event in EVENT_MAP:
         state["prev_state"] = EVENT_MAP[event]
@@ -144,6 +150,7 @@ def octo_webhook():
     state["updated_at"] = time.time()
 
     save_printer_state(state)
+    push_event.set() # Wake up worker to show new print progress immediately
     return "ok", 200
 
 # --- OUTPUT ---
@@ -397,6 +404,46 @@ def get_dashboard_image():
 
     return send_file(tmp.name, mimetype="image/png")
 
+# -- PUSHING ---
+@app.route("/force_push", methods=["POST"])
+def force_push():
+    """Manually trigger the background worker to push an update."""
+    push_event.set()
+    return jsonify({"status": "pushed"})
+
+def push_worker():
+    while True:
+        try:
+            if os.path.exists(LAYOUT_JSON_PATH):
+                with open(LAYOUT_JSON_PATH, "r") as f:
+                    layout = json.load(f)
+                
+                interval = int(layout.get("canvas", {}).get("refreshInterval", 1200))
+                
+                # Render and Push
+                img = render_layout_to_image(layout)
+                img = img.rotate(180)
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format='PNG')
+                img_byte_arr.seek(0)
+                
+                if RPI_ENDPOINT:
+                    requests.post(RPI_ENDPOINT, files={'image': ('dash.png', img_byte_arr, 'image/png')}, timeout=10)
+                    print(f"Pushed to Pi. Next scheduled refresh in {interval}s", flush=True)
+                
+                # This is the magic part: wait for 'interval' seconds OR until push_event.set() is called
+                woken_up = push_event.wait(timeout=interval)
+                if woken_up:
+                    print("Worker woken up early (Layout updated or Printer event)!", flush=True)
+                    push_event.clear()
+            else:
+                time.sleep(5)
+        except Exception as e:
+            print(f"Push worker error: {e}", flush=True)
+            time.sleep(10)
+
 # --- MAIN ---
 if __name__ == "__main__":
+    thread = threading.Thread(target=push_worker, daemon=True)
+    thread.start()
     app.run(host="0.0.0.0", port=5001)
