@@ -27,6 +27,7 @@ const cellFnInput = document.getElementById("cellFnInput");
 const cellFontSizeInput = document.getElementById("cellFontSizeInput");
 const fontBoldInput = document.getElementById("fontBold");
 const fontItalicInput = document.getElementById("fontItalic");
+const cellWrapInput = document.getElementById("cellWrapInput");
 const cellInvertInput = document.getElementById("cellInvertInput");
 const cellScaleModeInput = document.getElementById("cellScaleModeInput");
 const cellIndentInput = document.getElementById("cellIndentInput");
@@ -135,81 +136,83 @@ function drawCells() {
         const textColor = cell.invert ? "#ffffff" : "#000000";
         const handleColor = "#808080";
 
-        // Fill
         ctx.fillStyle = fillColor;
         ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
 
-        // Border
         if (cell === selectedCell || cell.outline) {
             ctx.lineWidth = (cell === selectedCell) ? 3 : 1.5;
             ctx.strokeStyle = (cell === selectedCell) ? "#7e7e7eff" : "#000000ff";
             ctx.strokeRect(cell.x, cell.y, cell.w, cell.h);
         }
 
-        // Resize handle
         ctx.fillStyle = handleColor;
-        ctx.fillRect(
-            cell.x + cell.w - HANDLE_SIZE,
-            cell.y + cell.h - HANDLE_SIZE,
-            HANDLE_SIZE,
-            HANDLE_SIZE
-        );
+        ctx.fillRect(cell.x + cell.w - HANDLE_SIZE, cell.y + cell.h - HANDLE_SIZE, HANDLE_SIZE, HANDLE_SIZE);
 
-        // Text overlay with alignment
-        const padding = (cell.indent || 0) + 4;
         const fontSize = clampFontSize(cell.fontSize || 12);
         ctx.fillStyle = textColor;
         ctx.font = `${fontSize}px system-ui, sans-serif`;
-        ctx.textBaseline = "top";
+        ctx.textBaseline = "middle"; // Vital for correct vertical alignment
 
-        let label;
-        if (cell.staticText && cell.staticText.trim().length > 0) {
-            label = cell.staticText;
-        } else {
-            const fnSuffix = cell.fnName ? (" • " + cell.fnName) : "";
-            label = cell.name + fnSuffix;
-        }
+        let label = (cell.staticText && cell.staticText.trim().length > 0) 
+            ? cell.staticText 
+            : (cell.name + (cell.fnName ? (" • " + cell.fnName) : ""));
 
         const hAlign = (cell.hAlign || "left").toLowerCase();
         const vAlign = (cell.vAlign || "top").toLowerCase();
+        const padding = (cell.indent || 0) + 4;
+        const maxW = Math.max(10, cell.w - (2 * padding));
+        const shouldWrap = cell.wrapText !== false; // Default to true
 
-        const lines = [label];
+        let wrappedLines = [];
+        if (shouldWrap) {
+            label.split('\n').forEach(p => {
+                let words = p.split(' ');
+                let line = '';
+                for (let n = 0; n < words.length; n++) {
+                    let testLine = line + words[n] + ' ';
+                    if (ctx.measureText(testLine.trim()).width > maxW && n > 0) {
+                        wrappedLines.push(line.trim());
+                        line = words[n] + ' ';
+                    } else {
+                        line = testLine;
+                    }
+                }
+                wrappedLines.push(line.trim());
+            });
+        } else {
+            wrappedLines = label.split('\n');
+        }
+
         const lineHeight = fontSize + 2;
-        const totalHeight = lineHeight * lines.length;
+        const totalH = lineHeight * wrappedLines.length;
 
         let yStart;
         if (vAlign === "middle") {
-            yStart = cell.y + (cell.h - totalHeight) / 2;
+            yStart = cell.y + (cell.h / 2) - (totalH / 2) + (lineHeight / 2);
         } else if (vAlign === "bottom") {
-            yStart = cell.y + cell.h - padding - totalHeight;
+            yStart = cell.y + cell.h - padding - totalH + (lineHeight / 2);
         } else {
-            yStart = cell.y + padding;
+            yStart = cell.y + padding + (lineHeight / 2);
         }
 
         ctx.save();
         ctx.beginPath();
-        ctx.rect(
-            cell.x + padding,
-            cell.y + padding,
-            cell.w - 2 * padding,
-            cell.h - 2 * padding
-        );
+        ctx.rect(cell.x, cell.y, cell.w, cell.h);
         ctx.clip();
 
-        let yText = yStart;
-        for (const line of lines) {
-            const textW = ctx.measureText(line).width;
-            let xText;
-            if (hAlign === "center") {
-                xText = cell.x + (cell.w - textW) / 2;
-            } else if (hAlign === "right") {
-                xText = cell.x + cell.w - padding - textW;
-            } else {
-                xText = cell.x + padding;
+        wrappedLines.forEach((line, i) => {
+            const tw = ctx.measureText(line).width;
+            let tx;
+            if (hAlign === "center") tx = cell.x + (cell.w - tw) / 2;
+            else if (hAlign === "right") tx = cell.x + cell.w - padding - tw;
+            else tx = cell.x + padding;
+
+            const currY = yStart + (i * lineHeight);
+            // Simple visibility check
+            if (currY + (fontSize/2) <= cell.y + cell.h + 2 && currY - (fontSize/2) >= cell.y - 2) {
+                ctx.fillText(line, tx, currY);
             }
-            ctx.fillText(line, xText, yText);
-            yText += lineHeight;
-        }
+        });
 
         ctx.restore();
     }
@@ -262,6 +265,7 @@ canvas.addEventListener("mousedown", (evt) => {
     cellFontSizeInput.value = clampFontSize(cell.fontSize || 12);
     cellHAlignInput.value = cell.hAlign || "left";
     cellVAlignInput.value = cell.vAlign || "top";
+    cellWrapInput.checked = cell.wrapText !== false;
     cellScaleModeInput.value = cell.scaleMode || "fit";
     cellStaticTextInput.value = cell.staticText || "";
     const src = cell.staticImageSource || (cell.staticImage ? "url" : "none");
@@ -282,6 +286,10 @@ canvas.addEventListener("mousedown", (evt) => {
     }
 
     draw();
+});
+
+cellWrapInput.addEventListener("change", () => {
+    if (selectedCell) { selectedCell.wrapText = cellWrapInput.checked; draw(); }
 });
 
 canvas.addEventListener("mousemove", (evt) => {
@@ -391,6 +399,12 @@ cellOutlineInput.addEventListener("change", () => {
         draw();
     }
 });
+cellWrapInput.addEventListener("change", () => {
+    if (selectedCell) {
+        selectedCell.wrapText = cellWrapInput.checked;
+        draw();
+    }
+});
 
 addCellBtn.addEventListener("click", addCell);
 deleteCellBtn.addEventListener("click", () => {
@@ -429,6 +443,7 @@ lockLayoutBtn.addEventListener("click", async () => {
             fnName: c.fnName || "",
             invert: !!c.invert,
             fontSize: clampFontSize(c.fontSize || 12),
+            wrapText: c.wrapText !== false,
             hAlign: c.hAlign || "left",
             vAlign: c.vAlign || "top",
             scaleMode: c.scaleMode || "fit",

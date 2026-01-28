@@ -224,163 +224,114 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 
     cells = layout.get("cells", [])
     for cell in cells:
-        x = int(cell["x"])
-        y = int(cell["y"])
-        w = int(cell["w"])
-        h = int(cell["h"])
-
-        name = str(cell.get("name", ""))
-        fn_name_raw = str(cell.get("fnName", "") or "")
+        x, y, w, h = int(cell["x"]), int(cell["y"]), int(cell["w"]), int(cell["h"])
         invert = bool(cell.get("invert", False))
-        static_text = str(cell.get("staticText", "") or "")
-        static_image_path = cell.get("staticImage") or ""
-    
-        padding = int(canvas_cfg.get("padding", 4))
         indent = int(cell.get("indent", 0))
-        padding = padding + indent
-        
+        padding = int(canvas_cfg.get("padding", 4)) + indent
         font_size = int(cell.get("fontSize", 12))
-        is_bold = bool(cell.get("fontBold", False))
-        is_italic = bool(cell.get("fontItalic", False))
-        if is_bold and is_italic and os.path.exists(BOLD_ITALIC_FONT_PATH):
-            font = get_font(font_size, BOLD_ITALIC_FONT_PATH)
-        elif is_bold and os.path.exists(BOLD_FONT_PATH):
-            font = get_font(font_size, BOLD_FONT_PATH)
-        elif is_italic and os.path.exists(ITALIC_FONT_PATH):
-            font = get_font(font_size, ITALIC_FONT_PATH)
+        
+        # Color mapping
+        bg, fg = (0, 255) if invert else (255, 0)
+
+        # Draw cell background/outline
+        if bool(cell.get("outline", False)):
+            draw.rectangle([x, y, x + w, y + h], fill=bg, outline=fg)
         else:
-            font = get_font(font_size, REGULAR_FONT_PATH)
+            draw.rectangle([x, y, x + w, y + h], fill=bg)
 
-        # Set color based on invert
-        bg = 0 if invert else 255
-        fg = 255 if invert else 0
-
-        # cell background
-        outline_flag = bool(cell.get("outline", False))
-        draw.rectangle(
-            [x, y, x + w, y + h],
-            fill=bg,
-            outline=fg if outline_flag else bg
-        )
-
-        # run function if provided
+        # Run function
+        fn_name_raw = str(cell.get("fnName", "") or "")
         result = run_cell_function(fn_name_raw, w, h, indent) if fn_name_raw else None
 
-        # image branch: fn image or static image
+        # --- IMAGE BRANCH (Restored for Immich/Static) ---
         content_img = None
         if isinstance(result, Image.Image):
             content_img = result.convert("L")
-        elif static_image_path:
+        elif cell.get("staticImage"):
             try:
-                if static_image_path.startswith("http://") or static_image_path.startswith("https://"):
-                    resp_img = requests.get(static_image_path, timeout=5)
-                    resp_img.raise_for_status()
-                    content_img = Image.open(BytesIO(resp_img.content)).convert("L")
+                path = cell.get("staticImage")
+                if path.startswith("http"):
+                    resp = requests.get(path, timeout=5)
+                    content_img = Image.open(BytesIO(resp.content)).convert("L")
                 else:
-                    path = static_image_path
-                    if not os.path.isabs(path):
-                        path = os.path.join(BASE_DIR, path)
-                    content_img = Image.open(path).convert("L")
+                    full_path = path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
+                    content_img = Image.open(full_path).convert("L")
             except Exception as e:
-                print("static image load error:", static_image_path, e)
-                content_img = None
+                print(f"Image load error: {e}")
+
         if content_img is not None:
-            # If function says "don't scale", paste raw and skip all scaling steps
             if hasattr(content_img, "skip_scale") and content_img.skip_scale:
-                paste_x = x + (w - content_img.width) // 2
-                paste_y = y + (h - content_img.height) // 2
-                if invert:
-                    content_img = ImageOps.invert(content_img)
-                img.paste(content_img, (paste_x, paste_y))
+                px = x + (w - content_img.width) // 2
+                py = y + (h - content_img.height) // 2
+                if invert: content_img = ImageOps.invert(content_img)
+                img.paste(content_img, (px, py))
                 continue
+
+            mode = str(cell.get("scaleMode", "fit")).lower()
+            max_w, max_h = max(1, w - 2 * padding), max(1, h - 2 * padding)
             
-            # Cell-level override; fall back to "fit"
-            scale_mode = str(cell.get("scaleMode", "") or "").lower()
-            if scale_mode not in ("fit", "fill", "none"):
-                scale_mode = "fit"
-
-            max_w = max(1, w - 2 * padding)
-            max_h = max(1, h - 2 * padding)
-
-            if scale_mode == "fill":
-                inner_x = x + 1
-                inner_y = y + 1
-                inner_w = max(1, w - 2)
-                inner_h = max(1, h - 2)
-
-                content_img = ImageOps.fit(content_img, (inner_w, inner_h))
-                paste_x, paste_y = inner_x, inner_y
-
-            elif scale_mode == "none":
-                content_img = content_img.crop(
-                    (0, 0, min(content_img.width, max_w), min(content_img.height, max_h))
-                )
-                paste_x = x + padding
-                paste_y = y + padding
-
-            else:  # "fit"
+            if mode == "fill":
+                content_img = ImageOps.fit(content_img, (w - 2, h - 2))
+                px, py = x + 1, y + 1
+            elif mode == "none":
+                content_img = content_img.crop((0, 0, min(content_img.width, max_w), min(content_img.height, max_h)))
+                px, py = x + padding, y + padding
+            else: # fit
                 content_img.thumbnail((max_w, max_h))
-                paste_x = x + padding + (max_w - content_img.width) // 2
-                paste_y = y + padding + (max_h - content_img.height) // 2
+                px = x + padding + (max_w - content_img.width) // 2
+                py = y + padding + (max_h - content_img.height) // 2
 
-            if invert:
-                content_img = ImageOps.invert(content_img)
-
-            img.paste(content_img, (paste_x, paste_y))
-            continue  # done with this cell
-
-        # text branch: function text OR static text
-        if result is None or isinstance(result, Image.Image):
-            content_text = static_text
-        else:
-            content_text = str(result) if str(result) else static_text
-        if not content_text:
-            # no fn text, no static text -> nothing to draw
+            if invert: content_img = ImageOps.invert(content_img)
+            img.paste(content_img, (px, py))
             continue
 
-        # Alignment options from layout, with defaults
+        # --- TEXT BRANCH ---
+        content_text = str(result) if result is not None else str(cell.get("staticText", "") or "")
+        if not content_text: continue
+
+        # Load correct font
+        is_bold = bool(cell.get("fontBold", False))
+        f_path = BOLD_FONT_PATH if is_bold and os.path.exists(BOLD_FONT_PATH) else REGULAR_FONT_PATH
+        font = get_font(font_size, f_path)
+
+        # Wrap text logic
+        should_wrap = bool(cell.get("wrapText", True))
+        max_txt_w = max(10, w - (2 * padding))
+        wrapped_lines = []
+        if should_wrap:
+            for para in content_text.splitlines():
+                words = para.split(' ')
+                line = []
+                for word in words:
+                    test = ' '.join(line + [word])
+                    if draw.textbbox((0, 0), test, font=font)[2] <= max_txt_w or not line:
+                        line.append(word)
+                    else:
+                        wrapped_lines.append(' '.join(line))
+                        line = [word]
+                wrapped_lines.append(' '.join(line))
+        else:
+            wrapped_lines = content_text.splitlines()
+
+        # Vertical Alignment
         h_align = str(cell.get("hAlign", "left")).lower()
         v_align = str(cell.get("vAlign", "top")).lower()
-        if h_align not in ("left", "center", "right"):
-            h_align = "left"
-        if v_align not in ("top", "middle", "bottom"):
-            v_align = "top"
+        line_h = font_size + 2
+        total_h = line_h * len(wrapped_lines)
 
-        lines = content_text.splitlines()
-        line_height = font_size + 2
-        num_lines = len(lines)
-        total_height = line_height * num_lines
+        if v_align == "middle": ty = y + (h - total_h) // 2
+        elif v_align == "bottom": ty = y + h - padding - total_h
+        else: ty = y + padding
 
-        # Vertical alignment: compute first line's y
-        if v_align == "top":
-            y_start = y + padding
-        elif v_align == "middle":
-            y_start = y + (h - total_height) // 2
-        else:  # "bottom"
-            y_start = y + h - padding - total_height
+        for line in wrapped_lines:
+            if ty + font_size > y + h: break
+            tw = draw.textbbox((0, 0), line, font=font)[2]
+            if h_align == "center": tx = x + (w - tw) // 2
+            elif h_align == "right": tx = x + w - padding - tw
+            else: tx = x + padding
 
-        y_text = y_start
-
-        for line in lines:
-            if y_text > y + h - padding:
-                break
-
-            bbox = draw.textbbox((0, 0), line, font=font)
-            text_w = bbox[2] - bbox[0]
-
-            if h_align == "left":
-                x_text = x + padding
-            elif h_align == "center":
-                x_text = x + (w - text_w) // 2
-            else:  # "right"
-                x_text = x + w - padding - text_w
-
-            # Simulate bold if needed and no bold font file exists
-            if is_bold and not os.path.exists(BOLD_FONT_PATH):
-                draw.text((x_text + 1, y_text), line, fill=fg, font=font)
-
-            draw.text((x_text, y_text), line, fill=fg, font=font)
-            y_text += line_height
+            draw.text((tx, ty), line, fill=fg, font=font)
+            ty += line_h
 
     return img
 
