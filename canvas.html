@@ -104,6 +104,24 @@
             </label>
         </details>
 
+        <!-- Cell: Home Assistant Entity -->
+        <details>
+            <summary>Cell: Home Assistant Entity</summary>
+            <label>Home Assistant Entity ID</label>
+            <input type="text" id="cellEntityIdInput" placeholder="e.g. sensor.outside_temperature" list="ha-entities" autocomplete="off" />
+            <datalist id="ha-entities"></datalist>
+            <label>HA Entity Type (for icon/formatting preview)</label>
+            <select id="cellHAEntityTypeInput">
+                <option value="none">None (auto-detect)</option>
+                <option value="sensor">Sensor</option>
+                <option value="binary_sensor">Binary Sensor</option>
+                <option value="light">Light</option>
+                <option value="switch">Switch</option>
+                <option value="weather">Weather</option>
+                <option value="camera">Camera (Not supported yet)</option>
+            </select>
+        </details>
+
         <!-- Cell: Image -->
         <details>
             <summary>Cell: Image</summary>

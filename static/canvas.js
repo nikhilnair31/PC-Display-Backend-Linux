@@ -41,6 +41,11 @@ const forceRefreshBtn = document.getElementById("forceRefreshBtn");
 const cellHAlignInput = document.getElementById("cellHAlignInput");
 const cellVAlignInput = document.getElementById("cellVAlignInput");
 
+// NEW: HA Entity Inputs
+const cellEntityIdInput = document.getElementById("cellEntityIdInput");
+const cellHAEntityTypeInput = document.getElementById("cellHAEntityTypeInput");
+const haEntitiesDatalist = document.getElementById("ha-entities");
+
 // Each cell:
 // { id, x, y, w, h, name, fnName, invert, fontSize }
 let cells = [];
@@ -78,6 +83,8 @@ function addCell() {
     const staticText = cellStaticTextInput.value || "";
     const urlVal = cellStaticImageUrlInput ? cellStaticImageUrlInput.value.trim() : "";
     const imageSource = cellImageSourceInput ? (cellImageSourceInput.value || "none") : "none";
+    const entityId = cellEntityIdInput.value.trim(); // NEW
+    const entityType = cellHAEntityTypeInput.value; // NEW
 
     const defaultWidth = GRID_SIZE * 6;
     const defaultHeight = GRID_SIZE * 3;
@@ -100,6 +107,8 @@ function addCell() {
         staticImageSource: imageSource,
         indent: 0,
         outline: false,
+        entityId: entityId, // NEW
+        entityType: entityType, // NEW
     };
 
     cells.push(cell);
@@ -274,6 +283,9 @@ canvas.addEventListener("mousedown", (evt) => {
     cellStaticImageFileInput.value = "";
     cellIndentInput.value = selectedCell.indent || 0;
     cellOutlineInput.checked = !!selectedCell.outline;
+    // NEW: Load HA Entity properties
+    cellEntityIdInput.value = selectedCell.entityId || "";
+    cellHAEntityTypeInput.value = selectedCell.entityType || "none";
 
     if (isOnResizeHandle(cell, pos.x, pos.y)) {
         dragMode = "resize";
@@ -402,6 +414,20 @@ cellOutlineInput.addEventListener("change", () => {
 cellWrapInput.addEventListener("change", () => {
     if (selectedCell) {
         selectedCell.wrapText = cellWrapInput.checked;
+        draw();
+    }
+});
+
+// NEW: Event Listeners for HA Entity inputs
+cellEntityIdInput.addEventListener("change", () => {
+    if (selectedCell) {
+        selectedCell.entityId = cellEntityIdInput.value.trim();
+        draw();
+    }
+});
+cellHAEntityTypeInput.addEventListener("change", () => {
+    if (selectedCell) {
+        selectedCell.entityType = cellHAEntityTypeInput.value;
         draw();
     }
 });

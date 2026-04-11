@@ -33,8 +33,60 @@ _font_cache: Dict[int, ImageFont.FreeTypeFont] = {}
 STATIC_IMG_DIR = os.path.join(BASE_DIR, "static_images")
 os.makedirs(STATIC_IMG_DIR, exist_ok=True)
 PRINTER_STATE_PATH = os.path.join(os.path.dirname(__file__), "printer_state.json")
-WEBHOOK_SECRET = os.environ.get("OCTO_WEBHOOK_SECRET", "SOME_LONG_RANDOM_STRING")
+WEBHOOK_SECRET=os.environ.get("WEBHOOK_SECRET", "SOME_LONG_RANDOM_STRING")
 RPI_ENDPOINT = os.environ.get("RPI_URL")
+
+# --- HOME ASSISTANT ---
+HA_URL = os.environ.get("HA_URL")
+HA_TOKEN = os.environ.get("HA_TOKEN")
+
+# Ensure HA_URL and HA_TOKEN are set
+if not HA_URL or not HA_TOKEN:
+    print("WARNING: Home Assistant URL or Token not set. HA features will be disabled.", flush=True)
+    HA_HEADERS: Dict[str, str] = {}
+else:
+    HA_HEADERS = {
+        "Authorization": f"Bearer {HA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+def get_ha_entity_state(entity_id: str) -> dict | None:
+    if not HA_HEADERS: # HA is disabled
+        return None
+    try:
+        response = requests.get(f"{HA_URL}/api/states/{entity_id}", headers=HA_HEADERS, timeout=5)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching HA entity {entity_id}: {e}", flush=True)
+        return None
+
+def get_ha_entities() -> list[dict]:
+    if not HA_HEADERS: # HA is disabled
+        return []
+    try:
+        response = requests.get(f"{HA_URL}/api/states", headers=HA_HEADERS, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching all HA entities: {e}", flush=True)
+        return []
+
+@app.route("/api/ha/entities")
+def list_ha_entities():
+    entities = get_ha_entities()
+    simplified_entities = []
+    for entity in entities:
+        simplified_entities.append({
+            "entity_id": entity["entity_id"],
+            "friendly_name": entity["attributes"].get("friendly_name", entity["entity_id"]),
+            "state": entity["state"],
+            "unit_of_measurement": entity["attributes"].get("unit_of_measurement"),
+            "device_class": entity["attributes"].get("device_class"),
+            "icon": entity["attributes"].get("icon"),
+            "domain": entity["entity_id"].split('.')[0]
+        })
+    return jsonify(simplified_entities)
 
 functions_module = importlib.import_module("functions")
 FUNCTION_MAP = {
@@ -239,14 +291,31 @@ def render_layout_to_image(layout: dict) -> Image.Image:
         else:
             draw.rectangle([x, y, x + w, y + h], fill=bg)
 
-        # Run function
-        fn_name_raw = str(cell.get("fnName", "") or "")
-        result = run_cell_function(fn_name_raw, w, h, indent) if fn_name_raw else None
+        # Run function or fetch HA entity
+        content_text = ""
+        content_img = None
+
+        entity_id = cell.get("entityId", "")
+        if entity_id:
+            entity_state = get_ha_entity_state(entity_id)
+            if entity_state:
+                # Basic text formatting for HA entity
+                state = entity_state.get("state", "UNKNOWN")
+                unit = entity_state["attributes"].get("unit_of_measurement", "")
+                if unit:
+                    content_text = f"{state}{unit}"
+                else:
+                    content_text = str(state)
+            else:
+                content_text = f"ERR:{entity_id[:10]}..."
+        elif fn_name_raw:
+            result = run_cell_function(fn_name_raw, w, h, indent)
+            if isinstance(result, Image.Image):
+                content_img = result.convert("L")
+            else:
+                content_text = str(result) if result is not None else ""
 
         # --- IMAGE BRANCH (Restored for Immich/Static) ---
-        content_img = None
-        if isinstance(result, Image.Image):
-            content_img = result.convert("L")
         elif cell.get("staticImage"):
             try:
                 path = cell.get("staticImage")
