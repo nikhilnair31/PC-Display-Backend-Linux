@@ -1,3 +1,5 @@
+# functions.py
+
 import os, json, requests
 from statistics import mean
 from io import BytesIO
@@ -25,6 +27,38 @@ def get_font(size: int) -> ImageFont.ImageFont:
     return font
 
 # --- CONTENT ---
+
+WEATHER_ICON_MAP = {
+    "clear-night": "https://img.icons8.com/forma-bold/100/moon.png",
+    "cloudy": "https://img.icons8.com/forma-bold/100/cloud.png",
+    "fog": "https://img.icons8.com/forma-bold/100/fog-day.png",
+    "hail": "https://img.icons8.com/forma-bold/100/hail.png",
+    "lightning": "https://img.icons8.com/forma-bold/100/lightning-bolt.png",
+    "lightning-rainy": "https://img.icons8.com/forma-bold/100/storm.png",
+    "partlycloudy": "https://img.icons8.com/forma-bold/100/partly-cloudy-day.png",
+    "pouring": "https://img.icons8.com/forma-bold/100/rain.png",
+    "rainy": "https://img.icons8.com/forma-bold/100/light-rain.png",
+    "snowy": "https://img.icons8.com/forma-bold/100/snow.png",
+    "snowy-rainy": "https://img.icons8.com/forma-bold/100/sleet.png",
+    "sunny": "https://img.icons8.com/forma-bold/100/sun.png",
+    "windy": "https://img.icons8.com/forma-bold/100/wind.png",
+    "windy-variant": "https://img.icons8.com/forma-bold/100/wind.png",
+    "exceptional": "https://img.icons8.com/forma-bold/100/error.png",
+}
+
+def get_ha_weather_icon(entity_id):
+    """Internal helper to resolve icon URL from weather state"""
+    ha_url = os.environ.get("HA_URL")
+    ha_token = os.environ.get("HA_TOKEN")
+    url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
+    headers = {"Authorization": f"Bearer {ha_token}"}
+    
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        state = resp.json().get("state", "").lower().replace("_", "").replace(" ", "")
+        return WEATHER_ICON_MAP.get(state, WEATHER_ICON_MAP["exceptional"])
+    except:
+        return WEATHER_ICON_MAP["exceptional"]
 
 def get_ha_state(cell_w: int, cell_h: int, cell_i: int, cell: dict = None) -> str:
     ha_url = os.getenv("HA_URL")

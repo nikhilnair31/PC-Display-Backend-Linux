@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <title>E-Paper Dashboard Layout</title>
     <link rel="stylesheet" href="/static/canvas.css" />
+    <style>
+        /* Custom Dropdown Styling */
+        .dropdown-options {
+            position: absolute; top: 100%; left: 0; right: 0;
+            background: #fff; border: 1px solid #aaa; border-top: none;
+            max-height: 250px; overflow-y: auto; z-index: 9999;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.15); border-radius: 0 0 4px 4px;
+        }
+        .dropdown-options.hidden { display: none; }
+        .dropdown-option { padding: 6px 8px; cursor: pointer; border-bottom: 1px solid #eee; text-align: left; }
+        .dropdown-option:hover { background-color: #e3f2fd; }
+        .dropdown-option strong { display: block; font-size: 13px; color: #222; margin-bottom: 2px; font-weight: 600; }
+        .dropdown-option small { display: block; font-size: 11px; color: #666; font-family: monospace; }
+        .dropdown-option.empty { cursor: default; color: #888; font-style: italic; }
+        .dropdown-option.empty:hover { background-color: #fff; }
+    </style>
 </head>
 <body>
     <div id="sidebar">
@@ -17,6 +33,14 @@
                 <button id="deleteCellBtn">Delete Selected Cell</button>
                 <button id="lockLayoutBtn">Save Layout</button>
                 <button id="forceRefreshBtn" style="background-color: #4a90e2; color: white; margin-top: 10px;">Force Refresh Pi</button>
+                
+                <!-- ADD THIS PREVIEW TOGGLE -->
+                <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <label class="checkbox-inline" style="margin: 0;">
+                        <input type="checkbox" id="haPreviewToggle" /> <strong>Live HA Preview</strong>
+                    </label>
+                    <small id="previewStatus" style="color: #666; font-style: italic;"></small>
+                </div>
             </div>
         </details>
 
@@ -115,19 +139,36 @@
                 <input type="checkbox" id="cellWrapInput" checked />
                 Enable text wrapping
             </label>
+
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <div style="flex: 1;">
+                    <label>Prefix (Front)</label>
+                    <input type="text" id="cellPrefixInput" placeholder='ex: "Name: "' />
+                </div>
+                <div style="flex: 1;">
+                    <label>Suffix (Back)</label>
+                    <input type="text" id="cellSuffixInput" placeholder='ex: "%"' />
+                </div>
+            </div>
+            
+            <div style="margin-top: 10px;">
+                <label>Round to decimals (Leave blank for none)</label>
+                <input type="number" id="cellRoundInput" min="0" max="10" placeholder="ex: 1" />
+            </div>
         </details>
 
         <!-- Cell: Home Assistant -->
         <details open>
             <summary>Cell: Home Assistant Entity</summary>
-            <label>Home Assistant Entity ID</label>
-            <input type="text" id="cellHaEntityIdInput" placeholder="e.g. sensor.outside_temperature" />
 
-            <label>HA Entity Type</label>
-            <select id="cellHaEntityTypeInput">
-                <option value="none">None (auto-detect)</option>
-                <option value="temperature">Temperature</option>
-            </select>
+            <label>Home Assistant Entity ID</label>
+            <div style="position: relative; display: flex; gap: 5px; margin-bottom: 8px;">
+                <div style="position: relative; flex: 1;">
+                    <input type="text" id="cellHaEntityIdInput" placeholder="Search or type entity ID..." style="margin-bottom: 0; width: 100%; box-sizing: border-box;" autocomplete="off" />
+                    <div id="haEntitiesCustomList" class="dropdown-options hidden"></div>
+                </div>
+                <button id="refreshHaEntitiesBtn" type="button" title="Refresh list from Home Assistant" style="margin-bottom: 0; padding: 4px 8px;">↻</button>
+            </div>
             <p style="font-size: 10px; color: #666; margin-top: 4px;">If Fn Name is left empty, the framework automatically uses Home Assistant for this Entity ID!</p>
         </details>
 

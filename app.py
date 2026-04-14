@@ -1,3 +1,5 @@
+# app.py
+
 import re, os, sys, json, time, random, psutil, subprocess, requests, tempfile, importlib, inspect, traceback, threading
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -65,6 +67,40 @@ def canvas_layout():
 
     return jsonify(data)
 
+# --- HOME ASSISTANT INTEGRATION ---
+@app.route("/api/ha_entities", methods=["GET"])
+def get_ha_entities():
+    ha_url = os.environ.get("HA_URL")
+    ha_token = os.environ.get("HA_TOKEN")
+    
+    if not ha_url or not ha_token:
+        return jsonify({"error": "HA config missing"}), 400
+
+    url = f"{ha_url.rstrip('/')}/api/states"
+    headers = {
+        "Authorization": f"Bearer {ha_token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            entities = [
+                {
+                    "id": e["entity_id"],
+                    "name": e.get("attributes", {}).get("friendly_name", ""),
+                    "state": e.get("state", "") # ADD THIS LINE
+                }
+                for e in data
+            ]
+            entities.sort(key=lambda x: x["id"])
+            return jsonify(entities)
+        else:
+            return jsonify({"error": f"HA returned {resp.status_code}"}), resp.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # --- OUTPUT ---
 @app.route("/upload_static_image", methods=["POST"])
 def upload_static_image():
@@ -123,21 +159,40 @@ def run_cell_function(fn_name_raw: str, w: int, h: int, i: int, cell_dict: dict)
         print(f"ERROR in function '{fn_name}': {e!r}\n{tb}", flush=True)
         return f"ERR: {e.__class__.__name__}"
 
+def break_word_py(word: str, font: ImageFont.ImageFont, draw: ImageDraw.ImageDraw, max_w: int, lines: list) -> str:
+    current_str = ""
+    for char in word:
+        test_str = current_str + char
+        if draw.textbbox((0, 0), test_str, font=font)[2] > max_w and current_str != "":
+            lines.append(current_str)
+            current_str = char
+        else:
+            current_str = test_str
+    return current_str
+
 def get_wrapped_text(text: str, font: ImageFont.ImageFont, draw: ImageDraw.ImageDraw, max_w: int) -> list:
     lines = []
-    for para in text.splitlines():
-        words = para.split(' ')
-        if not words:
+    for para in str(text).splitlines():
+        if not para:
+            lines.append("")
             continue
-        line = words[0]
-        for word in words[1:]:
-            test_line = line + ' ' + word
+        words = para.split(' ')
+        line = ""
+        for word in words:
+            test_line = line + ("" if not line else " ") + word
             if draw.textbbox((0, 0), test_line, font=font)[2] <= max_w:
                 line = test_line
             else:
-                lines.append(line)
-                line = word
-        lines.append(line)
+                if line:
+                    lines.append(line)
+                    line = word
+                    # Check if the individual word also exceeds the max width
+                    if draw.textbbox((0, 0), word, font=font)[2] > max_w:
+                        line = break_word_py(word, font, draw, max_w, lines)
+                else:
+                    line = break_word_py(word, font, draw, max_w, lines)
+        if line:
+            lines.append(line)
     return lines
 
 def render_layout_to_image(layout: dict) -> Image.Image:
@@ -150,6 +205,10 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 
     cells = layout.get("cells", [])
     for cell in cells:
+        round_digits = cell.get("round")
+        prefix = str(cell.get("prefix", ""))
+        suffix = str(cell.get("suffix", ""))
+
         x, y, w, h = int(cell["x"]), int(cell["y"]), int(cell["w"]), int(cell["h"])
         invert = bool(cell.get("invert", False))
         indent = int(cell.get("indent", 0))
@@ -165,7 +224,7 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 
         fn_name_raw = str(cell.get("fnName", "") or "").strip()
 
-        # HA Fallback: If no function but there's an entity, automatically route to HA
+        # HA Fallback
         if not fn_name_raw and cell.get("haEntityId"):
             ent = str(cell.get("haEntityId"))
             if ent.startswith("camera.") or ent.startswith("image."):
@@ -174,10 +233,20 @@ def render_layout_to_image(layout: dict) -> Image.Image:
                 fn_name_raw = "get_ha_state"
 
         result = run_cell_function(fn_name_raw, w, h, indent, cell) if fn_name_raw else None
-
+        
         # --- IMAGE BRANCH ---
         content_img = None
-        if isinstance(result, Image.Image):
+        if not result and cell.get("haEntityId"):
+            ent = str(cell.get("haEntityId"))
+            if ent.startswith("weather."):
+                # 1. Get the actual icon URL using the helper in functions.py
+                icon_url = functions_module.get_ha_weather_icon(ent)
+                try:
+                    resp = requests.get(icon_url, timeout=5)
+                    content_img = Image.open(BytesIO(resp.content)).convert("L")
+                except Exception as e:
+                    print(f"Weather icon download failed: {e}")
+        elif isinstance(result, Image.Image):
             content_img = result.convert("L")
         elif cell.get("staticImage"):
             try:
@@ -219,7 +288,20 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 
         # --- TEXT BRANCH ---
         content_text = str(result) if result is not None else str(cell.get("staticText", "") or "")
-        if not content_text: continue
+        # Apply rounding if specified and content is numeric
+        if round_digits is not None:
+            try:
+                # Remove any existing % or spaces before trying to float
+                clean_text = content_text.replace('%', '').strip()
+                num = float(clean_text)
+                content_text = f"{num:.{round_digits}f}"
+            except (ValueError, TypeError):
+                pass # Not a number, skip rounding
+
+        # Then apply prefix/suffix
+        content_text = prefix + content_text + suffix
+        # content_text = str(result) if result is not None else str(cell.get("staticText", "") or "")
+        # if not content_text: continue
 
         # Text Transformations
         text_transform = str(cell.get("textTransform", "none")).lower()
@@ -232,7 +314,7 @@ def render_layout_to_image(layout: dict) -> Image.Image:
         elif text_transform == "titlecase":
             content_text = content_text.title()
 
-        # Load correct font path based on styles
+        # Load correct font path
         is_bold = bool(cell.get("fontBold", False))
         is_italic = bool(cell.get("fontItalic", False))
         if is_bold and is_italic: f_path = BOLD_ITALIC_FONT_PATH
@@ -243,7 +325,7 @@ def render_layout_to_image(layout: dict) -> Image.Image:
         if not os.path.exists(f_path):
             f_path = REGULAR_FONT_PATH
 
-        # Wrapping and Auto Text Sizing
+        # Wrapping and Auto Sizing
         auto_size = bool(cell.get("autoTextSize", False))
         should_wrap = bool(cell.get("wrapText", True))
         max_txt_w = max(10, w - (2 * padding))
@@ -252,7 +334,7 @@ def render_layout_to_image(layout: dict) -> Image.Image:
         font = None
 
         if auto_size:
-            best_size = min(max_txt_h, 200) # Safe max size
+            best_size = min(max_txt_h, 200)
             min_size = 6
             while best_size >= min_size:
                 font = get_font(best_size, f_path)
@@ -276,7 +358,7 @@ def render_layout_to_image(layout: dict) -> Image.Image:
             else:
                 wrapped_lines = content_text.splitlines()
 
-        # Vertical / Horizontal Alignment processing
+        # Aligns
         h_align = str(cell.get("hAlign", "left")).lower()
         v_align = str(cell.get("vAlign", "top")).lower()
         line_h = font_size + 2
