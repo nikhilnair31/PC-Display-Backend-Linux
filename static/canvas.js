@@ -24,6 +24,7 @@ const cellRoundInput = document.getElementById("cellRoundInput");
 const cellNameInput = document.getElementById("cellNameInput");
 const cellFnInput = document.getElementById("cellFnInput");
 const cellFontSizeInput = document.getElementById("cellFontSizeInput");
+const cellFontFamilyInput = document.getElementById("cellFontFamilyInput"); // <-- ADD THIS
 const fontBoldInput = document.getElementById("fontBold");
 const fontItalicInput = document.getElementById("fontItalic");
 const cellWrapInput = document.getElementById("cellWrapInput");
@@ -108,6 +109,9 @@ function addCell() {
     prefix: cellPrefixInput.value || "",
     suffix: cellSuffixInput.value || "",
     round: cellRoundInput.value !== "" ? parseInt(cellRoundInput.value, 10) : null,
+    fontSize: clampFontSize(parseInt(cellFontSizeInput.value, 10)),
+    fontFamily: cellFontFamilyInput ? cellFontFamilyInput.value : "default", // <-- ADD THIS
+    autoTextSize: cellAutoTextSizeInput.checked,
   };
 
   cells.push(cell);
@@ -468,6 +472,8 @@ canvas.addEventListener("mousedown", (evt) => {
     cellFnInput.value = cell.fnName || "";
     cellInvertInput.checked = !!cell.invert;
     cellFontSizeInput.value = clampFontSize(cell.fontSize || 12);
+    cellFontSizeInput.value = clampFontSize(cell.fontSize || 12);
+    if (cellFontFamilyInput) cellFontFamilyInput.value = cell.fontFamily || "default"; // <-- ADD THIS
     cellAutoTextSizeInput.checked = !!cell.autoTextSize;
     cellTextTransformInput.value = cell.textTransform || "none";
     fontBoldInput.checked = !!cell.fontBold;
@@ -532,6 +538,7 @@ canvas.addEventListener("mouseleave", () => {
   cellNameInput,
   cellFnInput,
   cellFontSizeInput,
+  cellFontFamilyInput,
   cellInvertInput,
   cellAutoTextSizeInput,
   cellTextTransformInput,
@@ -546,6 +553,9 @@ canvas.addEventListener("mouseleave", () => {
 ].forEach((el) => {
   el.addEventListener("change", () => {
     if (!selectedCell) return;
+    if (el === cellFontFamilyInput && cellFontFamilyInput) { // <-- ADD THIS BLOCK
+        selectedCell.fontFamily = cellFontFamilyInput.value;
+    }
     selectedCell.name = cellNameInput.value.trim() || selectedCell.name;
     selectedCell.fnName = cellFnInput.value.trim();
     selectedCell.invert = cellInvertInput.checked;
@@ -691,6 +701,7 @@ async function loadSavedLayout() {
       ...c,
       invert: !!c.invert,
       fontSize: clampFontSize(c.fontSize || 12),
+      fontFamily: c.fontFamily || "default",
       autoTextSize: !!c.autoTextSize,
       textTransform: c.textTransform || "none",
       fontBold: !!c.fontBold,
@@ -749,6 +760,7 @@ lockLayoutBtn.addEventListener("click", async () => {
         fnName: c.fnName || "",
         invert: !!c.invert,
         fontSize: clampFontSize(c.fontSize || 12),
+        fontFamily: c.fontFamily || "default",
         autoTextSize: !!c.autoTextSize,
         textTransform: c.textTransform || "none",
         fontBold: !!c.fontBold,

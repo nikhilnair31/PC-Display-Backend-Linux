@@ -121,6 +121,12 @@
                 <option value="titlecase">Title Case</option>
             </select>
 
+            <label for="cellFontFamilyInput">Font Family</label>
+            <select id="cellFontFamilyInput" class="w-full mb-2 p-1 border">
+                <option value="default">Helmet (Default)</option>
+                <option value="jetbrains">JetBrains Mono</option>
+            </select>
+
             <div class="field-row">
                 <label>Font style</label>
                 <div class="toggle-group">
@@ -150,7 +156,7 @@
                     <input type="text" id="cellSuffixInput" placeholder='ex: "%"' />
                 </div>
             </div>
-            
+
             <div style="margin-top: 10px;">
                 <label>Round to decimals (Leave blank for none)</label>
                 <input type="number" id="cellRoundInput" min="0" max="10" placeholder="ex: 1" />

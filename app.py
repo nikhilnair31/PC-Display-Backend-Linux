@@ -32,6 +32,26 @@ push_event = threading.Event()
 
 app = Flask(__name__)
 
+# --- FONT CONFIGURATION ---
+# Define a map for different font families found in your directory
+FONT_FAMILIES = {
+    "default": "Helmet-Regular.ttf",
+    "jetbrains": "JetBrainsMono-Regular.ttf",
+    "jetbrains_italic": "JetBrainsMono-Italic-VariableFont_wght.ttf"
+}
+
+def get_font_path(family_name: str, bold: bool = False, italic: bool = False) -> str:
+    family = family_name.lower()
+    
+    # Handle JetBrains logic
+    if family == "jetbrains":
+        if italic:
+            return FONT_FAMILIES["jetbrains_italic"]
+        return FONT_FAMILIES["jetbrains"]
+    
+    # Fallback to dictionary or default
+    return FONT_FAMILIES.get(family, FONT_FAMILIES["default"])
+
 # --- CANVAS ---
 @app.route("/canvas")
 def layout_canvas():
@@ -122,13 +142,17 @@ def upload_static_image():
 
 def get_font(size: int, fontpath: str) -> ImageFont.ImageFont:
     size = max(6, min(200, int(size)))
-    if size in _font_cache:
-        return _font_cache[size]
+    # Use both size AND the path as the cache key so different fonts of the same size don't overlap
+    cache_key = (size, fontpath) 
+    
+    if cache_key in _font_cache:
+        return _font_cache[cache_key]
     try:
         font = ImageFont.truetype(fontpath, size)
     except Exception:
         font = ImageFont.load_default()
-    _font_cache[size] = font
+        
+    _font_cache[cache_key] = font
     return font
 
 def strip_fn_name(raw: str) -> str:
@@ -288,6 +312,7 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 
         # --- TEXT BRANCH ---
         content_text = str(result) if result is not None else str(cell.get("staticText", "") or "")
+        
         # Apply rounding if specified and content is numeric
         if round_digits is not None:
             try:
@@ -300,8 +325,22 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 
         # Then apply prefix/suffix
         content_text = prefix + content_text + suffix
-        # content_text = str(result) if result is not None else str(cell.get("staticText", "") or "")
-        # if not content_text: continue
+
+        # Load correct font path dynamically
+        font_family = str(cell.get("fontFamily", "default")).lower()
+        is_bold = bool(cell.get("fontBold", False))
+        is_italic = bool(cell.get("fontItalic", False))
+        
+        # Get path from our helper
+        f_path = get_font_path(font_family, is_bold, is_italic)
+        
+        # Ensure path is absolute for the OS
+        if not os.path.isabs(f_path):
+            f_path = os.path.join(BASE_DIR, f_path)
+
+        # Final safety check
+        if not os.path.exists(f_path):
+            f_path = os.path.join(BASE_DIR, FONT_FAMILIES["default"])
 
         # Text Transformations
         text_transform = str(cell.get("textTransform", "none")).lower()
@@ -313,17 +352,6 @@ def render_layout_to_image(layout: dict) -> Image.Image:
             content_text = content_text.capitalize()
         elif text_transform == "titlecase":
             content_text = content_text.title()
-
-        # Load correct font path
-        is_bold = bool(cell.get("fontBold", False))
-        is_italic = bool(cell.get("fontItalic", False))
-        if is_bold and is_italic: f_path = BOLD_ITALIC_FONT_PATH
-        elif is_bold: f_path = BOLD_FONT_PATH
-        elif is_italic: f_path = ITALIC_FONT_PATH
-        else: f_path = REGULAR_FONT_PATH
-        
-        if not os.path.exists(f_path):
-            f_path = REGULAR_FONT_PATH
 
         # Wrapping and Auto Sizing
         auto_size = bool(cell.get("autoTextSize", False))
