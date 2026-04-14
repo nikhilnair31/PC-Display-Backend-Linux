@@ -1,6 +1,5 @@
 // canvas.js
 
-// --- CONFIG ---
 let CANVAS_WIDTH = 480;
 let CANVAS_HEIGHT = 800;
 let GRID_SIZE = 40;
@@ -32,6 +31,11 @@ const cellInvertInput = document.getElementById("cellInvertInput");
 const cellScaleModeInput = document.getElementById("cellScaleModeInput");
 const cellIndentInput = document.getElementById("cellIndentInput");
 const cellOutlineInput = document.getElementById("cellOutlineInput");
+const cellAutoTextSizeInput = document.getElementById("cellAutoTextSizeInput");
+const cellTextTransformInput = document.getElementById("cellTextTransformInput");
+
+const cellHaEntityIdInput = document.getElementById("cellHaEntityIdInput");
+const cellHaEntityTypeInput = document.getElementById("cellHaEntityTypeInput");
 
 const addCellBtn = document.getElementById("addCellBtn");
 const deleteCellBtn = document.getElementById("deleteCellBtn");
@@ -41,15 +45,11 @@ const forceRefreshBtn = document.getElementById("forceRefreshBtn");
 const cellHAlignInput = document.getElementById("cellHAlignInput");
 const cellVAlignInput = document.getElementById("cellVAlignInput");
 
-// Each cell:
-// { id, x, y, w, h, name, fnName, invert, fontSize }
 let cells = [];
 let selectedCell = null;
-
-let dragMode = null;     // "move" or "resize" or null
+let dragMode = null;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
-
 const HANDLE_SIZE = 10;
 
 function setCanvasSize() {
@@ -64,7 +64,7 @@ function snapToGrid(value) {
 
 function clampFontSize(n) {
     if (isNaN(n)) return 12;
-    return Math.max(6, Math.min(48, n));
+    return Math.max(6, Math.min(200, n));
 }
 
 function addCell() {
@@ -72,13 +72,7 @@ function addCell() {
     const fnName = cellFnInput.value.trim();
     const invert = cellInvertInput.checked;
     const fontSize = clampFontSize(parseInt(cellFontSizeInput.value, 10));
-    const hAlign = cellHAlignInput.value || "left";
-    const vAlign = cellVAlignInput.value || "top";
-    const scaleMode = cellScaleModeInput.value || "fit";
-    const staticText = cellStaticTextInput.value || "";
-    const urlVal = cellStaticImageUrlInput ? cellStaticImageUrlInput.value.trim() : "";
-    const imageSource = cellImageSourceInput ? (cellImageSourceInput.value || "none") : "none";
-
+    
     const defaultWidth = GRID_SIZE * 6;
     const defaultHeight = GRID_SIZE * 3;
 
@@ -92,14 +86,19 @@ function addCell() {
         fnName: fnName,
         invert: invert,
         fontSize: fontSize,
-        hAlign: hAlign,
-        vAlign: vAlign,
-        scaleMode: scaleMode,
-        staticText: staticText,
-        staticImage: imageSource === "url" ? urlVal : "",
-        staticImageSource: imageSource,
+        autoTextSize: cellAutoTextSizeInput.checked,
+        textTransform: cellTextTransformInput.value || "none",
+        hAlign: cellHAlignInput.value || "left",
+        vAlign: cellVAlignInput.value || "top",
+        scaleMode: cellScaleModeInput.value || "fit",
+        staticText: cellStaticTextInput.value || "",
+        staticImage: (cellImageSourceInput && cellImageSourceInput.value === "url") ? (cellStaticImageUrlInput.value.trim()) : "",
+        staticImageSource: cellImageSourceInput ? (cellImageSourceInput.value || "none") : "none",
         indent: 0,
         outline: false,
+        wrapText: true,
+        haEntityId: cellHaEntityIdInput ? cellHaEntityIdInput.value.trim() : "",
+        haEntityType: cellHaEntityTypeInput ? cellHaEntityTypeInput.value : "none",
     };
 
     cells.push(cell);
@@ -130,6 +129,39 @@ function drawGrid() {
     }
 }
 
+// Function to handle Text Transformation
+function transformText(text, mode) {
+    if (!text) return "";
+    switch (mode) {
+        case "uppercase": return text.toUpperCase();
+        case "lowercase": return text.toLowerCase();
+        case "capitalize": return text.charAt(0).toUpperCase() + text.slice(1);
+        case "titlecase": return text.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+        default: return text;
+    }
+}
+
+// Function to handle text wrapping identically to Python logic
+function wrapTextJS(ctx, text, maxW) {
+    let lines = [];
+    text.split('\n').forEach(p => {
+        let words = p.split(' ');
+        if(words.length === 0) return;
+        let line = words[0];
+        for (let n = 1; n < words.length; n++) {
+            let testLine = line + ' ' + words[n];
+            if (ctx.measureText(testLine).width <= maxW) {
+                line = testLine;
+            } else {
+                lines.push(line);
+                line = words[n];
+            }
+        }
+        lines.push(line);
+    });
+    return lines;
+}
+
 function drawCells() {
     for (const cell of cells) {
         const fillColor = cell.invert ? "#000000" : "#ffffff";
@@ -148,42 +180,49 @@ function drawCells() {
         ctx.fillStyle = handleColor;
         ctx.fillRect(cell.x + cell.w - HANDLE_SIZE, cell.y + cell.h - HANDLE_SIZE, HANDLE_SIZE, HANDLE_SIZE);
 
-        const fontSize = clampFontSize(cell.fontSize || 12);
         ctx.fillStyle = textColor;
-        ctx.font = `${fontSize}px system-ui, sans-serif`;
-        ctx.textBaseline = "middle"; // Vital for correct vertical alignment
+        ctx.textBaseline = "middle";
 
         let label = (cell.staticText && cell.staticText.trim().length > 0) 
             ? cell.staticText 
             : (cell.name + (cell.fnName ? (" • " + cell.fnName) : ""));
 
+        // Text Processing
+        label = transformText(label, cell.textTransform);
+
         const hAlign = (cell.hAlign || "left").toLowerCase();
         const vAlign = (cell.vAlign || "top").toLowerCase();
         const padding = (cell.indent || 0) + 4;
         const maxW = Math.max(10, cell.w - (2 * padding));
-        const shouldWrap = cell.wrapText !== false; // Default to true
-
+        const maxH = Math.max(10, cell.h - (2 * padding));
+        const shouldWrap = cell.wrapText !== false;
+        const autoSize = cell.autoTextSize === true;
+        let fontSize = clampFontSize(cell.fontSize || 12);
+        
         let wrappedLines = [];
-        if (shouldWrap) {
-            label.split('\n').forEach(p => {
-                let words = p.split(' ');
-                let line = '';
-                for (let n = 0; n < words.length; n++) {
-                    let testLine = line + words[n] + ' ';
-                    if (ctx.measureText(testLine.trim()).width > maxW && n > 0) {
-                        wrappedLines.push(line.trim());
-                        line = words[n] + ' ';
-                    } else {
-                        line = testLine;
-                    }
+        let activeFontSize = fontSize;
+
+        if (autoSize) {
+            let testSize = Math.min(maxH, 200);
+            while (testSize >= 6) {
+                ctx.font = `${cell.fontItalic ? 'italic ' : ''}${cell.fontBold ? 'bold ' : ''}${testSize}px system-ui, sans-serif`;
+                wrappedLines = shouldWrap ? wrapTextJS(ctx, label, maxW) : label.split('\n');
+                
+                const totalH = (testSize + 2) * wrappedLines.length;
+                const maxLineW = Math.max(...wrappedLines.map(l => ctx.measureText(l).width), 0);
+                
+                if (totalH <= maxH && maxLineW <= maxW) {
+                    break;
                 }
-                wrappedLines.push(line.trim());
-            });
+                testSize--;
+            }
+            activeFontSize = testSize;
         } else {
-            wrappedLines = label.split('\n');
+            ctx.font = `${cell.fontItalic ? 'italic ' : ''}${cell.fontBold ? 'bold ' : ''}${activeFontSize}px system-ui, sans-serif`;
+            wrappedLines = shouldWrap ? wrapTextJS(ctx, label, maxW) : label.split('\n');
         }
 
-        const lineHeight = fontSize + 2;
+        const lineHeight = activeFontSize + 2;
         const totalH = lineHeight * wrappedLines.length;
 
         let yStart;
@@ -208,8 +247,7 @@ function drawCells() {
             else tx = cell.x + padding;
 
             const currY = yStart + (i * lineHeight);
-            // Simple visibility check
-            if (currY + (fontSize/2) <= cell.y + cell.h + 2 && currY - (fontSize/2) >= cell.y - 2) {
+            if (currY + (activeFontSize/2) <= cell.y + cell.h + 2 && currY - (activeFontSize/2) >= cell.y - 2) {
                 ctx.fillText(line, tx, currY);
             }
         });
@@ -263,6 +301,10 @@ canvas.addEventListener("mousedown", (evt) => {
     cellFnInput.value = cell.fnName || "";
     cellInvertInput.checked = !!cell.invert;
     cellFontSizeInput.value = clampFontSize(cell.fontSize || 12);
+    cellAutoTextSizeInput.checked = !!cell.autoTextSize;
+    cellTextTransformInput.value = cell.textTransform || "none";
+    fontBoldInput.checked = !!cell.fontBold;
+    fontItalicInput.checked = !!cell.fontItalic;
     cellHAlignInput.value = cell.hAlign || "left";
     cellVAlignInput.value = cell.vAlign || "top";
     cellWrapInput.checked = cell.wrapText !== false;
@@ -274,6 +316,8 @@ canvas.addEventListener("mousedown", (evt) => {
     cellStaticImageFileInput.value = "";
     cellIndentInput.value = selectedCell.indent || 0;
     cellOutlineInput.checked = !!selectedCell.outline;
+    if(cellHaEntityIdInput) cellHaEntityIdInput.value = cell.haEntityId || "";
+    if(cellHaEntityTypeInput) cellHaEntityTypeInput.value = cell.haEntityType || "none";
 
     if (isOnResizeHandle(cell, pos.x, pos.y)) {
         dragMode = "resize";
@@ -286,10 +330,6 @@ canvas.addEventListener("mousedown", (evt) => {
     }
 
     draw();
-});
-
-cellWrapInput.addEventListener("change", () => {
-    if (selectedCell) { selectedCell.wrapText = cellWrapInput.checked; draw(); }
 });
 
 canvas.addEventListener("mousemove", (evt) => {
@@ -317,33 +357,23 @@ window.addEventListener("mouseup", () => { dragMode = null; });
 canvas.addEventListener("mouseleave", () => { dragMode = null; });
 
 // Update cell properties when form changes
-cellNameInput.addEventListener("change", () => {
-    if (selectedCell) { selectedCell.name = cellNameInput.value.trim() || selectedCell.name; draw(); }
-});
-cellFnInput.addEventListener("change", () => {
-    if (selectedCell) { selectedCell.fnName = cellFnInput.value.trim(); draw(); }
-});
-cellInvertInput.addEventListener("change", () => {
-    if (selectedCell) { selectedCell.invert = cellInvertInput.checked; draw(); }
-});
-cellFontSizeInput.addEventListener("change", () => {
-    if (selectedCell) { selectedCell.fontSize = clampFontSize(parseInt(cellFontSizeInput.value, 10)); draw(); }
-});
-cellHAlignInput.addEventListener("change", () => {
-    if (selectedCell) { selectedCell.hAlign = cellHAlignInput.value || "left"; draw(); }
-});
-cellVAlignInput.addEventListener("change", () => {
-    if (selectedCell) { selectedCell.vAlign = cellVAlignInput.value || "top"; draw(); }
-});
+cellNameInput.addEventListener("change", () => { if (selectedCell) { selectedCell.name = cellNameInput.value.trim() || selectedCell.name; draw(); } });
+cellFnInput.addEventListener("change", () => { if (selectedCell) { selectedCell.fnName = cellFnInput.value.trim(); draw(); } });
+cellInvertInput.addEventListener("change", () => { if (selectedCell) { selectedCell.invert = cellInvertInput.checked; draw(); } });
+cellFontSizeInput.addEventListener("change", () => { if (selectedCell) { selectedCell.fontSize = clampFontSize(parseInt(cellFontSizeInput.value, 10)); draw(); } });
+cellAutoTextSizeInput.addEventListener("change", () => { if (selectedCell) { selectedCell.autoTextSize = cellAutoTextSizeInput.checked; draw(); } });
+cellTextTransformInput.addEventListener("change", () => { if (selectedCell) { selectedCell.textTransform = cellTextTransformInput.value || "none"; draw(); } });
+fontBoldInput.addEventListener("change", () => { if (selectedCell) { selectedCell.fontBold = fontBoldInput.checked; draw(); } });
+fontItalicInput.addEventListener("change", () => { if (selectedCell) { selectedCell.fontItalic = fontItalicInput.checked; draw(); } });
+cellHAlignInput.addEventListener("change", () => { if (selectedCell) { selectedCell.hAlign = cellHAlignInput.value || "left"; draw(); } });
+cellVAlignInput.addEventListener("change", () => { if (selectedCell) { selectedCell.vAlign = cellVAlignInput.value || "top"; draw(); } });
 cellScaleModeInput.addEventListener("change", () => {
     if (selectedCell) {
         const v = (cellScaleModeInput.value || "fit").toLowerCase();
         if (v === "fit" || v === "fill" || v === "none") { selectedCell.scaleMode = v; draw(); }
     }
 });
-cellStaticTextInput.addEventListener("input", () => {
-    if (selectedCell) { selectedCell.staticText = cellStaticTextInput.value || ""; draw(); }
-});
+cellStaticTextInput.addEventListener("input", () => { if (selectedCell) { selectedCell.staticText = cellStaticTextInput.value || ""; draw(); } });
 cellImageSourceInput.addEventListener("change", () => {
     if (!selectedCell) return;
     const src = cellImageSourceInput.value || "none";
@@ -369,13 +399,11 @@ cellStaticImageFileInput.addEventListener("change", async (e) => {
             return;
         }
         const data = await resp.json();
-        const path = data.path;
-        selectedCell.staticImage = path;
+        selectedCell.staticImage = data.path;
         selectedCell.staticImageSource = "upload";
         cellImageSourceInput.value = "upload";
         draw();
     } catch (err) {
-        console.error("Upload error", err);
         alert("Error uploading image (see console).");
     }
 });
@@ -387,24 +415,11 @@ cellStaticImageUrlInput.addEventListener("change", () => {
     cellImageSourceInput.value = selectedCell.staticImageSource;
     draw();
 });
-cellIndentInput.addEventListener("change", () => {
-    if (selectedCell) {
-        selectedCell.indent = parseInt(cellIndentInput.value, 10) || 0;
-        draw();
-    }
-});
-cellOutlineInput.addEventListener("change", () => {
-    if (selectedCell) {
-        selectedCell.outline = cellOutlineInput.checked;
-        draw();
-    }
-});
-cellWrapInput.addEventListener("change", () => {
-    if (selectedCell) {
-        selectedCell.wrapText = cellWrapInput.checked;
-        draw();
-    }
-});
+cellIndentInput.addEventListener("change", () => { if (selectedCell) { selectedCell.indent = parseInt(cellIndentInput.value, 10) || 0; draw(); } });
+cellOutlineInput.addEventListener("change", () => { if (selectedCell) { selectedCell.outline = cellOutlineInput.checked; draw(); } });
+cellWrapInput.addEventListener("change", () => { if (selectedCell) { selectedCell.wrapText = cellWrapInput.checked; draw(); } });
+cellHaEntityIdInput.addEventListener("change", () => { if (selectedCell) { selectedCell.haEntityId = cellHaEntityIdInput.value.trim(); draw(); } });
+cellHaEntityTypeInput.addEventListener("change", () => { if (selectedCell) { selectedCell.haEntityType = cellHaEntityTypeInput.value; draw(); } });
 
 addCellBtn.addEventListener("click", addCell);
 deleteCellBtn.addEventListener("click", () => {
@@ -415,59 +430,47 @@ deleteCellBtn.addEventListener("click", () => {
 });
 
 applyCanvasSettingsBtn.addEventListener("click", () => {
-    const w = parseInt(canvasWidthInput.value, 10) || CANVAS_WIDTH;
-    const h = parseInt(canvasHeightInput.value, 10) || CANVAS_HEIGHT;
-    const g = parseInt(gridSizeInput.value, 10) || GRID_SIZE;
-    const p = parseInt(gridPaddingInput.value, 10) || GRID_PADDING;
-    const r = parseInt(refreshIntervalInput.value, 10) || REFRESH_INTERVAL;
-    CANVAS_WIDTH = Math.max(100, w);
-    CANVAS_HEIGHT = Math.max(100, h);
-    GRID_SIZE = Math.max(5, g);
-    GRID_PADDING = Math.max(4, p);
-    REFRESH_INTERVAL = Math.max(60, r);
+    CANVAS_WIDTH = Math.max(100, parseInt(canvasWidthInput.value, 10) || CANVAS_WIDTH);
+    CANVAS_HEIGHT = Math.max(100, parseInt(canvasHeightInput.value, 10) || CANVAS_HEIGHT);
+    GRID_SIZE = Math.max(5, parseInt(gridSizeInput.value, 10) || GRID_SIZE);
+    GRID_PADDING = Math.max(4, parseInt(gridPaddingInput.value, 10) || GRID_PADDING);
+    REFRESH_INTERVAL = Math.max(60, parseInt(refreshIntervalInput.value, 10) || REFRESH_INTERVAL);
     setCanvasSize();
 });
 
 lockLayoutBtn.addEventListener("click", async () => {
     const layout = {
         canvas: { 
-            width: CANVAS_WIDTH, 
-            height: CANVAS_HEIGHT, 
-            gridSize: GRID_SIZE,
-            padding: GRID_PADDING,
-            refreshInterval: REFRESH_INTERVAL
+            width: CANVAS_WIDTH, height: CANVAS_HEIGHT, 
+            gridSize: GRID_SIZE, padding: GRID_PADDING, refreshInterval: REFRESH_INTERVAL
         },
         cells: cells.map(c => ({
             id: c.id, x: c.x, y: c.y, w: c.w, h: c.h,
-            name: c.name,
-            fnName: c.fnName || "",
+            name: c.name, fnName: c.fnName || "",
             invert: !!c.invert,
             fontSize: clampFontSize(c.fontSize || 12),
+            autoTextSize: !!c.autoTextSize,
+            textTransform: c.textTransform || "none",
+            fontBold: !!c.fontBold,
+            fontItalic: !!c.fontItalic,
             wrapText: c.wrapText !== false,
-            hAlign: c.hAlign || "left",
-            vAlign: c.vAlign || "top",
+            hAlign: c.hAlign || "left", vAlign: c.vAlign || "top",
             scaleMode: c.scaleMode || "fit",
             staticText: c.staticText || "",
-            staticImage: c.staticImage || "",
-            staticImageSource: c.staticImageSource || "none",
+            staticImage: c.staticImage || "", staticImageSource: c.staticImageSource || "none",
             indent: c.indent || 0,
             outline: !!c.outline,
+            haEntityId: c.haEntityId || "", haEntityType: c.haEntityType || "none",
         }))
     };
     try {
         const resp = await fetch("/canvas_layout", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(layout)
         });
-        if (!resp.ok) {
-            const txt = await resp.text();
-            alert("Failed to save layout: " + resp.status + " - " + txt);
-        } else {
-            alert("Layout saved.");
-        }
+        if (!resp.ok) alert("Failed to save layout: " + resp.status);
+        else alert("Layout saved.");
     } catch (e) {
-        console.error("Error saving layout", e);
         alert("Error saving layout (see console).");
     }
 });
@@ -478,10 +481,7 @@ forceRefreshBtn.addEventListener("click", async () => {
         forceRefreshBtn.disabled = true;
 
         const resp = await fetch("/force_push", { method: "POST" });
-        
         if (resp.ok) {
-            console.log("Force push triggered successfully");
-            // Optional: visual feedback that it worked
             setTimeout(() => {
                 forceRefreshBtn.innerText = "Force Refresh Pi";
                 forceRefreshBtn.disabled = false;
@@ -491,7 +491,6 @@ forceRefreshBtn.addEventListener("click", async () => {
             forceRefreshBtn.disabled = false;
         }
     } catch (e) {
-        console.error("Error triggering force refresh:", e);
         alert("Error connecting to server.");
         forceRefreshBtn.disabled = false;
     }
@@ -517,26 +516,21 @@ async function loadSavedLayout() {
         refreshIntervalInput.value = REFRESH_INTERVAL;
 
         cells = (data.cells || []).map(c => ({
-            id: c.id, x: c.x, y: c.y, w: c.w, h: c.h,
-            name: c.name,
-            fnName: c.fnName || "",
+            ...c,
             invert: !!c.invert,
             fontSize: clampFontSize(c.fontSize || 12),
-            hAlign: c.hAlign || "left",
-            vAlign: c.vAlign || "top",
+            autoTextSize: !!c.autoTextSize,
+            textTransform: c.textTransform || "none",
+            fontBold: !!c.fontBold,
+            fontItalic: !!c.fontItalic,
             scaleMode: (c.scaleMode || "fit").toLowerCase(),
-            staticText: c.staticText || "",
-            staticImage: c.staticImage || "",
-            staticImageSource: c.staticImageSource || "none",
-            indent: c.indent || 0,
+            wrapText: c.wrapText !== false,
             outline: !!c.outline,
         }));
         setCanvasSize();
     } catch (e) {
-        console.error("Failed to load layout", e);
         setCanvasSize();
     }
 }
 
-// Initial setup
 loadSavedLayout();

@@ -1,24 +1,10 @@
-# app.py
-
 import re, os, sys, json, time, random, psutil, subprocess, requests, tempfile, importlib, inspect, traceback, threading
-from io import (
-    BytesIO
-)
-from PIL import (
-    Image, ImageDraw, ImageFont, ImageOps
-)
-from flask import (
-    Flask, send_file, request, jsonify
-)
-from typing import (
-    Any, Dict, Callable
-)
-from dotenv import (
-    load_dotenv
-)
-from werkzeug.utils import (
-    secure_filename
-)
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+from flask import Flask, send_file, request, jsonify
+from typing import Any, Dict, Callable
+from dotenv import load_dotenv
+from werkzeug.utils import secure_filename
 
 load_dotenv()
 
@@ -32,27 +18,12 @@ BOLD_ITALIC_FONT_PATH = "Helmet-Regular.ttf"
 _font_cache: Dict[int, ImageFont.FreeTypeFont] = {}
 STATIC_IMG_DIR = os.path.join(BASE_DIR, "static_images")
 os.makedirs(STATIC_IMG_DIR, exist_ok=True)
-PRINTER_STATE_PATH = os.path.join(os.path.dirname(__file__), "printer_state.json")
-WEBHOOK_SECRET = os.environ.get("OCTO_WEBHOOK_SECRET", "SOME_LONG_RANDOM_STRING")
 RPI_ENDPOINT = os.environ.get("RPI_URL")
 
 functions_module = importlib.import_module("functions")
 FUNCTION_MAP = {
     name: fn
     for name, fn in inspect.getmembers(functions_module, inspect.isfunction)
-}
-
-EVENT_MAP = {
-    1: "STARTED",
-    2: "COMPLETED",
-    3: "FAILED",
-    4: "PAUSED",
-    5: "RESUMED",
-    6: "UPDATE",
-    7: "ATTENTION",
-    8: "CANCELED",
-    9: "ERROR",
-    10: "COOLDOWN",
 }
 
 push_event = threading.Event()
@@ -67,7 +38,6 @@ def layout_canvas():
 @app.route("/canvas_layout", methods=["GET", "POST"])
 def canvas_layout():
     if request.method == "POST":
-        # Save layout
         try:
             data = request.get_json(force=True)
         except Exception:
@@ -80,10 +50,9 @@ def canvas_layout():
             print("Failed to save layout:", e, flush=True)
             return "Failed to save layout", 500
 
-        push_event.set() # Wake up the worker to push the new layout immediately
+        push_event.set() 
         return jsonify({"status": "ok"})
 
-    # GET -> load layout
     if not os.path.exists(LAYOUT_JSON_PATH):
         return jsonify({"canvas": None, "cells": []})
 
@@ -95,63 +64,6 @@ def canvas_layout():
         return jsonify({"canvas": None, "cells": []})
 
     return jsonify(data)
-
-# --- PRINTER ---
-def load_printer_state():
-    try:
-        with open(PRINTER_STATE_PATH, "r") as f:
-            dat = json.load(f)
-            # print(f'Loaded', flush=True)
-            return dat
-    except FileNotFoundError:
-        # print(f'FileNotFoundError', flush=True)
-        return {"state": "UNKNOWN", "progress": None}
-
-def save_printer_state(state):
-    with open(PRINTER_STATE_PATH, "w") as f:
-        json.dump(state, f)
-        # print(f'Saved', flush=True)
-
-@app.route("/octo_webhook", methods=["POST"])
-def octo_webhook():
-    data = request.get_json(silent=True) or {}
-    print(f'data: {data}', flush=True)
-
-    # --- Validate Secret ---
-    incoming_secret = data.get("SecretKey")
-    if incoming_secret != WEBHOOK_SECRET:
-        return "forbidden", 403
-
-    event = data.get("EventType")
-    progress = data.get("Progress")
-    filename = data.get("FileName")
-    error_msg = data.get("Error")
-    time_left = data.get("TimeRemainingSec")
-
-    state = load_printer_state()
-
-    # ---- APPLY EVENT TYPE STATE ----
-    if event in EVENT_MAP:
-        state["prev_state"] = EVENT_MAP[event]
-        state["state"] = EVENT_MAP[event]
-
-    # ---- Update progress ----
-    if progress is not None:
-        state["progress"] = progress
-
-    # ---- Update file ----
-    if filename:
-        state["file"] = filename
-
-    # ---- Update time remaining ----
-    if time_left is not None:
-        state["time_remaining"] = time_left
-    
-    state["updated_at"] = time.time()
-
-    save_printer_state(state)
-    push_event.set() # Wake up worker to show new print progress immediately
-    return "ok", 200
 
 # --- OUTPUT ---
 @app.route("/upload_static_image", methods=["POST"])
@@ -165,18 +77,15 @@ def upload_static_image():
 
     filename = secure_filename(file.filename)
     name, ext = os.path.splitext(filename)
-    # make it unique-ish
     filename = f"{name}_{int(time.time())}{ext}"
     save_path = os.path.join(STATIC_IMG_DIR, filename)
     file.save(save_path)
 
-    # store relative path in layout
     rel_path = os.path.relpath(save_path, BASE_DIR)
-
     return jsonify({"path": rel_path})
 
 def get_font(size: int, fontpath: str) -> ImageFont.ImageFont:
-    size = max(6, min(48, int(size)))
+    size = max(6, min(200, int(size)))
     if size in _font_cache:
         return _font_cache[size]
     try:
@@ -194,25 +103,42 @@ def strip_fn_name(raw: str) -> str:
         raw = raw[:-2].strip()
     return raw
 
-def run_cell_function(fn_name_raw: str, w: int, h: int, i: int) -> Any:
+def run_cell_function(fn_name_raw: str, w: int, h: int, i: int, cell_dict: dict) -> Any:
     fn_name = strip_fn_name(fn_name_raw)
     if not fn_name:
         return None
 
     fn = FUNCTION_MAP.get(fn_name)
     if fn is None:
-        msg = f"ERR {fn_name}: NOT_FOUND"
-        print(msg, flush=True)
-        return msg
+        return f"ERR {fn_name}: NOT_FOUND"
 
     try:
-        return fn(w, h, i)
+        sig = inspect.signature(fn)
+        if 'cell' in sig.parameters:
+            return fn(w, h, i, cell=cell_dict)
+        else:
+            return fn(w, h, i)
     except Exception as e:
         tb = traceback.format_exc()
-        # print full traceback to systemd/journal so you can read it
         print(f"ERROR in function '{fn_name}': {e!r}\n{tb}", flush=True)
-        # return a short error string that includes the exception message (so it shows up on the image)
-        return f"ERR {fn_name}: {e.__class__.__name__}: {str(e)}"
+        return f"ERR: {e.__class__.__name__}"
+
+def get_wrapped_text(text: str, font: ImageFont.ImageFont, draw: ImageDraw.ImageDraw, max_w: int) -> list:
+    lines = []
+    for para in text.splitlines():
+        words = para.split(' ')
+        if not words:
+            continue
+        line = words[0]
+        for word in words[1:]:
+            test_line = line + ' ' + word
+            if draw.textbbox((0, 0), test_line, font=font)[2] <= max_w:
+                line = test_line
+            else:
+                lines.append(line)
+                line = word
+        lines.append(line)
+    return lines
 
 def render_layout_to_image(layout: dict) -> Image.Image:
     canvas_cfg = layout.get("canvas", {})
@@ -230,20 +156,26 @@ def render_layout_to_image(layout: dict) -> Image.Image:
         padding = int(canvas_cfg.get("padding", 4)) + indent
         font_size = int(cell.get("fontSize", 12))
         
-        # Color mapping
         bg, fg = (0, 255) if invert else (255, 0)
 
-        # Draw cell background/outline
         if bool(cell.get("outline", False)):
             draw.rectangle([x, y, x + w, y + h], fill=bg, outline=fg)
         else:
             draw.rectangle([x, y, x + w, y + h], fill=bg)
 
-        # Run function
-        fn_name_raw = str(cell.get("fnName", "") or "")
-        result = run_cell_function(fn_name_raw, w, h, indent) if fn_name_raw else None
+        fn_name_raw = str(cell.get("fnName", "") or "").strip()
 
-        # --- IMAGE BRANCH (Restored for Immich/Static) ---
+        # HA Fallback: If no function but there's an entity, automatically route to HA
+        if not fn_name_raw and cell.get("haEntityId"):
+            ent = str(cell.get("haEntityId"))
+            if ent.startswith("camera.") or ent.startswith("image."):
+                fn_name_raw = "get_ha_image"
+            else:
+                fn_name_raw = "get_ha_state"
+
+        result = run_cell_function(fn_name_raw, w, h, indent, cell) if fn_name_raw else None
+
+        # --- IMAGE BRANCH ---
         content_img = None
         if isinstance(result, Image.Image):
             content_img = result.convert("L")
@@ -289,31 +221,62 @@ def render_layout_to_image(layout: dict) -> Image.Image:
         content_text = str(result) if result is not None else str(cell.get("staticText", "") or "")
         if not content_text: continue
 
-        # Load correct font
-        is_bold = bool(cell.get("fontBold", False))
-        f_path = BOLD_FONT_PATH if is_bold and os.path.exists(BOLD_FONT_PATH) else REGULAR_FONT_PATH
-        font = get_font(font_size, f_path)
+        # Text Transformations
+        text_transform = str(cell.get("textTransform", "none")).lower()
+        if text_transform == "uppercase":
+            content_text = content_text.upper()
+        elif text_transform == "lowercase":
+            content_text = content_text.lower()
+        elif text_transform == "capitalize":
+            content_text = content_text.capitalize()
+        elif text_transform == "titlecase":
+            content_text = content_text.title()
 
-        # Wrap text logic
+        # Load correct font path based on styles
+        is_bold = bool(cell.get("fontBold", False))
+        is_italic = bool(cell.get("fontItalic", False))
+        if is_bold and is_italic: f_path = BOLD_ITALIC_FONT_PATH
+        elif is_bold: f_path = BOLD_FONT_PATH
+        elif is_italic: f_path = ITALIC_FONT_PATH
+        else: f_path = REGULAR_FONT_PATH
+        
+        if not os.path.exists(f_path):
+            f_path = REGULAR_FONT_PATH
+
+        # Wrapping and Auto Text Sizing
+        auto_size = bool(cell.get("autoTextSize", False))
         should_wrap = bool(cell.get("wrapText", True))
         max_txt_w = max(10, w - (2 * padding))
+        max_txt_h = max(10, h - (2 * padding))
         wrapped_lines = []
-        if should_wrap:
-            for para in content_text.splitlines():
-                words = para.split(' ')
-                line = []
-                for word in words:
-                    test = ' '.join(line + [word])
-                    if draw.textbbox((0, 0), test, font=font)[2] <= max_txt_w or not line:
-                        line.append(word)
-                    else:
-                        wrapped_lines.append(' '.join(line))
-                        line = [word]
-                wrapped_lines.append(' '.join(line))
-        else:
-            wrapped_lines = content_text.splitlines()
+        font = None
 
-        # Vertical Alignment
+        if auto_size:
+            best_size = min(max_txt_h, 200) # Safe max size
+            min_size = 6
+            while best_size >= min_size:
+                font = get_font(best_size, f_path)
+                if should_wrap:
+                    wrapped_lines = get_wrapped_text(content_text, font, draw, max_txt_w)
+                else:
+                    wrapped_lines = content_text.splitlines()
+
+                line_h = best_size + 2
+                total_h = line_h * len(wrapped_lines)
+                max_line_w = max([draw.textbbox((0, 0), l, font=font)[2] for l in wrapped_lines] + [0])
+
+                if total_h <= max_txt_h and max_line_w <= max_txt_w:
+                    break
+                best_size -= 1
+            font_size = best_size
+        else:
+            font = get_font(font_size, f_path)
+            if should_wrap:
+                wrapped_lines = get_wrapped_text(content_text, font, draw, max_txt_w)
+            else:
+                wrapped_lines = content_text.splitlines()
+
+        # Vertical / Horizontal Alignment processing
         h_align = str(cell.get("hAlign", "left")).lower()
         v_align = str(cell.get("vAlign", "top")).lower()
         line_h = font_size + 2
@@ -338,7 +301,6 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 @app.route("/get_dashboard_image")
 def get_dashboard_image():
     if not os.path.exists(LAYOUT_JSON_PATH):
-        # Nothing saved yet – return 404 instead of raising
         return "No layout JSON found", 404
 
     with open(LAYOUT_JSON_PATH, "r", encoding="utf-8") as f:
@@ -347,7 +309,6 @@ def get_dashboard_image():
     img = render_layout_to_image(layout)
     img = img.rotate(180)
 
-    # Save to a temporary file and send it
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     img.save(tmp, format="PNG")
     tmp.flush()
@@ -355,10 +316,8 @@ def get_dashboard_image():
 
     return send_file(tmp.name, mimetype="image/png")
 
-# -- PUSHING ---
 @app.route("/force_push", methods=["POST"])
 def force_push():
-    """Manually trigger the background worker to push an update."""
     push_event.set()
     return jsonify({"status": "pushed"})
 
@@ -371,7 +330,6 @@ def push_worker():
                 
                 interval = int(layout.get("canvas", {}).get("refreshInterval", 1200))
                 
-                # Render and Push
                 img = render_layout_to_image(layout)
                 img = img.rotate(180)
                 img_byte_arr = BytesIO()
@@ -382,7 +340,6 @@ def push_worker():
                     requests.post(RPI_ENDPOINT, files={'image': ('dash.png', img_byte_arr, 'image/png')}, timeout=10)
                     print(f"Pushed to Pi. Next scheduled refresh in {interval}s", flush=True)
                 
-                # This is the magic part: wait for 'interval' seconds OR until push_event.set() is called
                 woken_up = push_event.wait(timeout=interval)
                 if woken_up:
                     print("Worker woken up early (Layout updated or Printer event)!", flush=True)
@@ -393,7 +350,6 @@ def push_worker():
             print(f"Push worker error: {e}", flush=True)
             time.sleep(10)
 
-# --- MAIN ---
 if __name__ == "__main__":
     thread = threading.Thread(target=push_worker, daemon=True)
     thread.start()
