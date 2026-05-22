@@ -1,84 +1,79 @@
 # E-Ink Dashboard
 
-## To-Do
-- Add default image on pi when server fails
-- Add multi layout dropdown
-- Add rules for layout (time/?)
-- Add cell rotation
-- Add multi select and edit
-- Add bold/italic fonts
-- Add more?
+Server-side backend for a Waveshare 7.5" e-paper dashboard. Renders a layout of cells (text, HA entities, images) into a grayscale PNG and pushes it to a Raspberry Pi over HTTP.
 
-## Done
-- Added printer status
-- Improve styling
-- Fix labeled image faces
-- Check why GPU temp is 0
-- Improve font size and boldness
+**Frontend (RPI):** [PC-Display-Frontend-Linux](https://github.com/nikhilnair31/PC-Display-Frontend-Linux)
 
-## Pi
-### Setup
-- Run this `git clone https://github.com/waveshareteam/e-Paper.git` at root
-- Run `sudo pip3 install --break-system-package python-dotenv requests`
-- No need to use virtual env here
+## Architecture
 
-### Service
-- Run these when updating the service
-    - `sudo systemctl daemon-reload`
-    - `sudo systemctl enable refresh_dashboard.service`
-    - `sudo systemctl disable refresh_dashboard.service`
-    - `sudo systemctl start refresh_dashboard.service`
-    - `sudo systemctl stop refresh_dashboard.service`
-    - `sudo systemctl restart refresh_dashboard.service`
-    - `sudo systemctl status refresh_dashboard.service`
-    - `journalctl -u refresh_dashboard -f`
-- Might need to run `sudo pkill -9 -f python` since GPIO busy error comes up at times
-
-### Files
-- Run the command below to copy a file from the PC to the Pi
-`scp <C:\Users\nikna\Downloads\Helmet-Regular.ttf> nikhil@raspberrypi:/home/nikhil/`
-
-### Script
-- The script on the pi just reads the image from the server
-
-## Server
-### Setup
-#### Firewall
-- Run `sudo ufw enable`
-- Check if firewall is active and enabled on system startup
-- If yes then run `sudo ufw allow 5001/tc`
-- Run `sudo ufw status`
-- Check if it has `5001/tcp ALLOW Anywhere`
-
-#### Power
-- Run `iwconfig`
-- If Power Management: on then proceed else you're good
-- Find/Create `sudo nano /etc/NetworkManager/conf.d/wifi-powersave.conf`
-- Write this in it
 ```
-    [connecction]
-    wifi.powersave = 2
+[Home Assistant] --> [app.py :5001] --POST image--> [RPI receiver :5002] --> [e-Paper display]
+                         ^
+                         |
+                   canvas_layout.json ( edited via /canvas UI )
 ```
-- Run `sudo systemctl restart NetworkManager`
-- Run `iwconfig` and check for Power Management: on again
 
-### Service
-- Run these when updating the service
-    - `sudo systemctl daemon-reload`
-    - `sudo systemctl enable dashboard.service`
-    - `sudo systemctl disable dashboard.service`
-    - `sudo systemctl start dashboard.service`
-    - `sudo systemctl stop dashboard.service`
-    - `sudo systemctl restart dashboard.service`
-    - `sudo systemctl status dashboard.service`
-    - `journalctl -u dashboard -f`
-- Environment in the service is that to ensure `nvidia-smi` works fine for GPU temp to show correctly
-- ExecStart has that at the start for the virtual env reference
+- **app.py** — Flask server. Renders layout to image, pushes to Pi on a timer or layout change.
+- **functions.py** — Content helpers (`get_ha_state`, `get_ha_image`, `get_ha_weather_icon`). Skips render if HA is unreachable.
+- **canvas_layout.json** — The layout definition. Edit via the `/canvas` web UI.
+- **canvas.html** — Drag-and-drop layout editor served at `/canvas`.
 
-### Script
-- Have the keys in the `.env` file
-- Visit `http://192.168.1.173:5001/canvas` and create the layout you want
-- Ensure layout is saved
+## Server Setup
 
-## Other
-- Use https://icons8.com/icons/ for icons
+### 1. Install dependencies
+
+```bash
+cd /home/nikhil/Projects/PC_Display
+python3 -m venv env
+source env/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Configure environment
+
+Create `.env` in the project root:
+
+```
+HA_URL=https://your-ha-instance.duckdns.org/
+HA_TOKEN=your_long_lived_access_token
+RPI_URL=http://<pi_ip>:5002/receive_image
+```
+
+### 3. Firewall
+
+```bash
+sudo ufw allow 5001/tcp
+```
+
+### 4. Systemd service
+
+```bash
+sudo cp dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now dashboard.service
+```
+
+### 5. Create layout
+
+Visit `http://<server_ip>:5001/canvas` and build your layout.
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/canvas` | GET | Layout editor UI |
+| `/canvas_layout` | GET/POST | Read or save layout JSON |
+| `/get_dashboard_image` | GET | Render and return the current dashboard as PNG |
+| `/api/ha_entities` | GET | List all HA entities (for the canvas editor) |
+| `/upload_static_image` | POST | Upload an image for use in cells |
+| `/force_push` | POST | Immediately push the current layout to the Pi |
+
+## RPI Setup
+
+See the [frontend repo](https://github.com/nikhilnair31/PC-Display-Frontend-Linux) for Pi-side setup. The Pi runs a polling script that fetches `/get_dashboard_image` from this server and writes it to the e-paper display.
+
+## Notes
+
+- Icons: [icons8.com/icons](https://icons8.com/icons/)
+- Font: Helmet-Regular.ttf (included in repo)
+- If HA is unreachable, the server skips rendering entirely — the Pi keeps showing the last good image.
