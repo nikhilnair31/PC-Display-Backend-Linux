@@ -416,6 +416,10 @@ def get_dashboard_image():
     with open(LAYOUT_JSON_PATH, "r", encoding="utf-8") as f:
         layout = json.load(f)
 
+    # Skip if layout uses HA and HA is unreachable
+    if _layout_has_ha_cells(layout) and not functions_module.check_ha_reachable():
+        return "HA unreachable — skipping render", 503
+
     img = render_layout_to_image(layout)
     img = img.rotate(180)
 
@@ -431,25 +435,43 @@ def force_push():
     push_event.set()
     return jsonify({"status": "pushed"})
 
+def _layout_has_ha_cells(layout: dict) -> bool:
+    """Return True if any cell references an HA entity."""
+    for cell in layout.get("cells", []):
+        if cell.get("haEntityId"):
+            return True
+        fn = str(cell.get("fnName", "") or "").strip()
+        if fn in ("get_ha_state", "get_ha_image", "get_ha_weather_icon"):
+            return True
+    return False
+
 def push_worker():
     while True:
         try:
             if os.path.exists(LAYOUT_JSON_PATH):
                 with open(LAYOUT_JSON_PATH, "r") as f:
                     layout = json.load(f)
-                
+
                 interval = int(layout.get("canvas", {}).get("refreshInterval", 1200))
-                
+
+                # Skip render+push if layout has HA cells and HA is unreachable
+                if _layout_has_ha_cells(layout) and not functions_module.check_ha_reachable():
+                    print("HA unreachable — skipping this cycle", flush=True)
+                    push_event.wait(timeout=interval)
+                    if push_event.is_set():
+                        push_event.clear()
+                    continue
+
                 img = render_layout_to_image(layout)
                 img = img.rotate(180)
                 img_byte_arr = BytesIO()
                 img.save(img_byte_arr, format='PNG')
                 img_byte_arr.seek(0)
-                
+
                 if RPI_ENDPOINT:
                     requests.post(RPI_ENDPOINT, files={'image': ('dash.png', img_byte_arr, 'image/png')}, timeout=10)
                     print(f"Pushed to Pi. Next scheduled refresh in {interval}s", flush=True)
-                
+
                 woken_up = push_event.wait(timeout=interval)
                 if woken_up:
                     print("Worker woken up early (Layout updated or Printer event)!", flush=True)
@@ -459,6 +481,7 @@ def push_worker():
         except Exception as e:
             print(f"Push worker error: {e}", flush=True)
             time.sleep(10)
+
 
 if __name__ == "__main__":
     thread = threading.Thread(target=push_worker, daemon=True)

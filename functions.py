@@ -46,6 +46,22 @@ WEATHER_ICON_MAP = {
     "exceptional": "https://img.icons8.com/forma-bold/100/error.png",
 }
 
+def check_ha_reachable() -> bool:
+    """Quick ping to HA — returns True if reachable within 3s."""
+    ha_url = os.getenv("HA_URL")
+    ha_token = os.getenv("HA_TOKEN")
+    if not ha_url or not ha_token:
+        return False
+    try:
+        resp = requests.get(
+            f"{ha_url.rstrip('/')}/api/",
+            headers={"Authorization": f"Bearer {ha_token}"},
+            timeout=3,
+        )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
 def get_ha_weather_icon(entity_id):
     """Internal helper to resolve icon URL from weather state"""
     ha_url = os.environ.get("HA_URL")
