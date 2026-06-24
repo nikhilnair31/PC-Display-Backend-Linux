@@ -258,6 +258,7 @@ function drawCells() {
     // 2. APPLY PRE/POST FIXES
     if (cell.prefix) label = cell.prefix + label;
     if (cell.suffix) label = label + cell.suffix;
+    label = label.replace(/\\n/g, '\n');
 
     // 3. APPLY TRANSFORMATIONS (now applies to the whole string ex: "TEMP: 22C")
     label = transformText(label, cell.textTransform);

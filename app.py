@@ -325,6 +325,7 @@ def render_layout_to_image(layout: dict) -> Image.Image:
 
         # Then apply prefix/suffix
         content_text = prefix + content_text + suffix
+        content_text = content_text.replace('\\n', '\n')
 
         # Load correct font path dynamically
         font_family = str(cell.get("fontFamily", "default")).lower()
@@ -403,7 +404,12 @@ def render_layout_to_image(layout: dict) -> Image.Image:
             elif h_align == "right": tx = x + w - padding - tw
             else: tx = x + padding
 
-            draw.text((tx, ty), line, fill=fg, font=font)
+            # Simulate bold via horizontal offset (no bold .ttf available)
+            if is_bold:
+                for offset in (0, 1):
+                    draw.text((tx + offset, ty), line, fill=fg, font=font)
+            else:
+                draw.text((tx, ty), line, fill=fg, font=font)
             ty += line_h
 
     return img
